@@ -34,9 +34,9 @@ class HeaterCheck:
             self.heating_gain = 5.
         elif self.heater_name == 'chamber_heater':
             self.hysteresis = 5.
-            self.check_gain_time = 2400.
+            self.check_gain_time = 900.
             self.max_error = 100.
-            self.heating_gain = 2.
+            self.heating_gain = 5.
         else:
             self.hysteresis = 10.
             self.check_gain_time = 20.

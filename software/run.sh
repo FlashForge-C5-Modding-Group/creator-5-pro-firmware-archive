@@ -49,9 +49,8 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
-if [ -f $WORK_DIR/app_startup.sh  ]; then
-        cp -f $WORK_DIR/app_startup.sh /usr/prog/
-fi
+cp -f $WORK_DIR/app_startup.sh /usr/prog/
+sync
 
 if [ -f $WORK_DIR/sys_start.sh  ]; then
         cp -f $WORK_DIR/sys_start.sh /usr/prog/bin/
@@ -103,6 +102,9 @@ sync
 
 cp $WORK_DIR/shadow  /usr/prog/etc/shadow
 sync
+sync
+
+sleep 5
 
 cd /usr/prog/PROGRAM/software
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
@@ -118,6 +120,6 @@ sync
 rm /usr/data/logs/printer*.log*
 sync
 
-sleep 3
+sleep 5
 
 exit 0
