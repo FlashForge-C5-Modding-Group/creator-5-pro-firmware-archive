@@ -342,7 +342,7 @@ def main():
         logging.warning("No log file specified!"
                         " Severe timing issues may result!")
     gc.disable()
-
+    sys.setrecursionlimit(10000)
     # Start Printer() class
     while 1:
         if bglogger is not None:
