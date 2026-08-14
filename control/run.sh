@@ -105,6 +105,44 @@ if [ -f $WORK_DIR/ISPCommand ];then
         fi
 fi
 
+# check update result
+if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ];then
+	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ; then
+		echo "result: eBoard failed, touch Update..."
+		touch $WORK_DIR/Update
+		cat $WORK_DIR/eBoard_fail.img > /dev/fb0
+		sleep 10000
+	fi
+fi
+
+if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ];then
+	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ; then
+		echo "result: heaterBoard failed, touch Update..."
+		touch $WORK_DIR/Update
+		cat $WORK_DIR/heaterBoard_fail.img > /dev/fb0
+		sleep 10000
+	fi
+fi
+
+if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ];then
+	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ; then
+		echo "result: levelBoard failed, touch Update..."
+		touch $WORK_DIR/Update
+		cat $WORK_DIR/levelBoard_fail.img > /dev/fb0
+		sleep 10000
+	fi
+fi
+
+if [ -f $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ];then
+	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ; then
+		echo "result: mainMcu failed, touch Update..."
+		touch $WORK_DIR/Update
+		cat $WORK_DIR/mcu_fail.img > /dev/fb0
+		sleep 10000
+	fi
+fi
+
+# remove small version
 cd /usr/prog/PROGRAM/control/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
 echo $DIR_COUNT
@@ -113,9 +151,8 @@ if [ ${DIR_COUNT} -gt 2 ];then
 	echo "rm " $CONTROL_VERSION
         rm -r /usr/prog/PROGRAM/control/$CONTROL_VERSION
 fi
-
-sync
-sleep 3
+		
+sleep 5
 
 exit 0
 
