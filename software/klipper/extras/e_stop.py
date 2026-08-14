@@ -263,14 +263,17 @@ class EStopFunc:
             return
 
         try:
-            reactor = self.printer.get_reactor()
+            # reactor = self.printer.get_reactor()
             for i in range(6): 
                 pin_state = self.get_pin_state()
                 if pin_state == "triggered":
-                    #self.gcode.run_script_from_command("GET_BASIC_PARAM")
-                    reactor.pause(reactor.monotonic() + 0.500)
+                    toolhead.wait_moves()
+                    toolhead.dwell(0.500)
+                    self.gcode.run_script_from_command("GET_BASIC_PARAM_LEVELBOARD")
+                    toolhead.dwell(1)
+                    # reactor.pause(reactor.monotonic() + 1)
                     if i == 5:
-                        error = '{"coded": "0099-0000-0000-0001", "msg":"Probe triggered prior to movement"}'
+                        error = '{"module": "estop", "status": "fail", "coded" : "0201-0000-0001", "msg" : "Probe triggered prior to movement"}'
                         raise self.printer.command_error(error)
                     continue
                 else:
@@ -314,7 +317,11 @@ class EStopFunc:
             reason = str(e)
             if "Timeout during endstop homing" in reason:
                 reason += HINT_TIMEOUT
-            logging.warning("coded:9999-0528-0000-0008,MSG[%s]", reason)
+            
+            reason = '{"module": "estop", "status": "fail", "coded" : "0201-0000-0005", "msg" : "%s"}' % (reason,)
+            if "after full movement" in reason:
+                reason = '{"module": "estop", "status": "fail", "coded" : "0201-0000-0003", "msg" : "No trigger on probe after full movement"}'
+            logging.warning("[%s]", reason)
             raise self.printer.command_error(reason)
         # Allow axis_twist_compensation to update results
         #self.printer.send_event("probe:update_results", epos)
@@ -339,7 +346,7 @@ class EStopFunc:
             if max(positions)-min(positions) > self.err_v:
                 if retries >= self.main_cnt:
                     logging.info("The estop is unqualified.")
-                    gcmd.respond_info("The estop is unqualified.")
+                    gcmd.respond_info('{"module": "estop", "status": "fail", "coded" : "0201-0000-0002", "msg" : "The estop is unqualified"}')
                     raise gcmd.error("The estop is unqualified.")
                 retries += 1
                 positions = []
@@ -374,11 +381,12 @@ class EStopFunc:
         self.position_offset = gcmd.get_float('TARGET', self.position_offset)
         pos = self.run_probe(gcmd)
         if self.stepper_name == "X":
-            gcmd.respond_info("Result is X=%.6f" % (pos,))
+            #gcmd.respond_info("Result is X=%.6f" % (pos,))
+            gcmd.respond_info('{"module": "estop", "status": "ok", "axis" : "X", "data" : "%.6f"}' % (pos,))
         elif self.stepper_name == "Y":
-            gcmd.respond_info("Result is Y=%.6f" % (pos,))
+            gcmd.respond_info('{"module": "estop", "status": "ok", "axis" : "Y", "data" : "%.6f"}' % (pos,))
         elif self.stepper_name == "Z":
-            gcmd.respond_info("Result is Z=%.6f" % (pos,))
+            gcmd.respond_info('{"module": "estop", "status": "ok", "axis" : "Z", "data" : "%.6f"}' % (pos,))
 
 
 def load_config_prefix(config):
