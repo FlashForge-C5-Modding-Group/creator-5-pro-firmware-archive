@@ -35,7 +35,7 @@ if [ -f $WORK_DIR/IAPCommand ];then
                 sync
                 
 				if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ];then
-					if grep -q "error\|fail" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ; then
+					if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ; then
 						echo "burn eBoard M3 include error | fail..."
 					else
 						echo "burn eBoard M3 completed..."
@@ -54,7 +54,7 @@ if [ -f $WORK_DIR/IAPCommand ];then
                 sync
 				
 				if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ];then
-					if grep -q "error\|fail" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ; then
+					if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ; then
 						echo "burn heaterBoard M3 include error | fail..."
 					else
 						echo "burn heaterBoard M3 completed..."
@@ -73,7 +73,7 @@ if [ -f $WORK_DIR/IAPCommand ];then
                 sync
 				
 				if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ];then
-					if grep -q "error\|fail" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ; then
+					if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ; then
 						echo "burn levelBoard M3 include error | fail..."
 					else
 						echo "burn levelBoard M3 completed..."
@@ -94,7 +94,7 @@ if [ -f $WORK_DIR/ISPCommand ];then
                 $WORK_DIR/ISPCommand  $WORK_DIR/$MCU_GD_M3  >> $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log
 				
 				if [ -f $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ];then
-					if grep -q "error\|fail" $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ; then
+					if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ; then
 						echo "burn GD M3 include error | fail..."
 					else
 						echo "burn GD M3 completed..."
@@ -113,6 +113,9 @@ if [ ${DIR_COUNT} -gt 2 ];then
 	echo "rm " $CONTROL_VERSION
         rm -r /usr/prog/PROGRAM/control/$CONTROL_VERSION
 fi
+
+sync
+sleep 3
 
 exit 0
 
