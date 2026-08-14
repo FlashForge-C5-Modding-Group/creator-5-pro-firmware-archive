@@ -12,6 +12,8 @@ MCU_HEATERBOARD_M3=heaterBoard.hex
 MCU_NBOARD_M3=nBoard.bin
 MCU_GD_M3=mainBoardGD.hex
 
+UPDATE_LOG_DIR=/usr/data/logs
+
 CHECH_ARCH=`uname -m`
 if [ "${CHECH_ARCH}" != "mips" ];then
     echo "Machine architecture error."
@@ -26,19 +28,22 @@ if [ -f $WORK_DIR/IAPCommand ];then
         chmod a+x $WORK_DIR/IAPCommand
         if [ -f $WORK_DIR/$MCU_EBOARD_M3 ];then
                 echo "burn eBoard M3 firmware..."
-                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_EBOARD_M3 /dev/ttyS5
+                rm $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log
+                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_EBOARD_M3 /dev/ttyS5 >> $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log
                 sync
         fi
 		
 	if [ -f $WORK_DIR/$MCU_HEATERBOARD_M3 ];then
                 echo "burn heaterBoard M3 firmware..."
-                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_HEATERBOARD_M3 /dev/ttyS4
+                rm $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log
+                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_HEATERBOARD_M3 /dev/ttyS4 >> $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log
                 sync
         fi
         
         if [ -f $WORK_DIR/$MCU_LEVELBOARD_M3 ];then
                 echo "burn levelBoard M3 firmware..."
-                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_LEVELBOARD_M3 /dev/ttyS7
+                rm $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log
+                $WORK_DIR/IAPCommand $WORK_DIR/$MCU_LEVELBOARD_M3 /dev/ttyS7 >> $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log
                 sync
         fi
 fi
@@ -47,7 +52,8 @@ if [ -f $WORK_DIR/ISPCommand ];then
         chmod a+x $WORK_DIR/ISPCommand
         if [ -f $WORK_DIR/$MCU_GD_M3 ];then
                 echo "burn GD M3 firmware..."
-                $WORK_DIR/ISPCommand  $WORK_DIR/$MCU_GD_M3
+                rm $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log
+                $WORK_DIR/ISPCommand  $WORK_DIR/$MCU_GD_M3 >> $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log
         fi
 fi
 
