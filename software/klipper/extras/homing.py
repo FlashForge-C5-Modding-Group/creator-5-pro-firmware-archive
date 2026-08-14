@@ -108,13 +108,14 @@ class HomingMove:
                         error = "Warning during homing %s: %s" % (name, str(e),)
                     else:
                         index = {'x': 0, 'y': 1, 'z': 2, 'probe': 3}.get(name, 255)
-                        error = '{"coded": "0003-0528-%4d-0003", "msg":"%s", "action": "cancel"}' % (index, "Error during homing %s: %s" % (name, str(e),))
+                        error = '{"coded": "0003-0555-%4d-0003", "msg":"%s", "action": "cancel"}' % (index, "Error during homing %s: %s" % (name, str(e),))
                 continue
             if trigger_time > 0.:
                 trigger_times[name] = trigger_time
             elif check_triggered and error is None:
                 if safe_z:
-                    logging.warning("safe_z_001 No trigger on %s after full movement", name)
+                    pass
+                    #logging.warning("safe_z_001 No trigger on %s after full movement", name)
                 else:
                     index = {'x': 0, 'y': 1, 'z': 2, 'probe': 3}.get(name, 255)
                     error = '{"coded": "0003-0528-%4d-0004", "msg":"%s", "action": "cancel"}' % (index, "No trigger on %s after full movement" % (name,))
@@ -337,7 +338,7 @@ class Homing:
                     res = mcu_stop.query_endstop(print_time)
                     logging.warning("z_homing:[%d]:[%d]",i, res)
                     if res:
-                        gcode.run_script_from_command("GET_BASIC_PARAM")
+                        #gcode.run_script_from_command("GET_BASIC_PARAM")
                         reactor.pause(reactor.monotonic() + 0.500)
                         if i == 5:
                             error = '{"coded": "0055-0000-0000-0001", "msg":"Probe triggered prior to movement"}'
@@ -505,13 +506,16 @@ class PrinterHoming:
     def probing_move(self, mcu_probe, pos, speed, rase=True, safe_mode=False):
         endstops = [(mcu_probe, "probe")]
         hmove = HomingMove(self.printer, endstops)
+        default_error_epos = [9999, 0, 0]
         try:
               epos = hmove.homing_move(pos, speed, probe_pos=True,
                                          safe_z=safe_mode)
-        except self.printer.command_error:
+        except self.printer.command_error as e:
             if self.printer.is_shutdown():
                 error = '{"coded": "0003-0528-0000-0008", "msg":"%s"}' % ("Probing failed due to printer shutdown")
                 raise self.printer.command_error(error)
+            if '0003-0555' in str(e): #time out
+                return default_error_epos
             raise
         if hmove.check_no_movement() is not None:
             #reactor = self.printer.get_reactor()

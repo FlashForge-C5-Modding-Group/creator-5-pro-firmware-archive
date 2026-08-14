@@ -59,20 +59,49 @@ if [ -f $WORK_DIR/sys_start.sh  ]; then
 fi
 sync
 
+rm /usr/prog/klipper/klippy/kinematics/__pycache__/*
+rm /usr/prog/klipper/klippy/__pycache__/*
+rm /usr/prog/klipper/klippy/chelper/__pycache__/*
+rm /usr/prog/klipper/klippy/extras/__pycache__/*
+sync
+
+cp $WORK_DIR/klipper_pri.sh  /usr/prog/klipper/klipper_pri.sh
+sync
+
+cp $WORK_DIR/start.sh  /usr/prog/klipper/start.sh
+sync
+
 cp $WORK_DIR/firmwareExe /usr/prog/PROGRAM/software/
 sync
 
 cp $WORK_DIR/unTar /usr/prog/bin/unTar
 sync
 
+cp $WORK_DIR/wakeup_level /usr/prog/bin/wakeup_level
+sync
+
 cp $WORK_DIR/klipper/klippy/*  /usr/prog/klipper/klippy/ -rf
 sync
+
 cp $WORK_DIR/klipper/kinematics/*  /usr/prog/klipper/klippy/kinematics/ -rf
 sync
-cp $WORK_DIR/klipper/extras/*  /usr/prog/klipper/klippy/extras/ -rf
 
+cp $WORK_DIR/klipper/extras/*  /usr/prog/klipper/klippy/extras/ -rf
 sync
+
+tar -xvf $WORK_DIR/klipper/chelper.tar -C /usr/prog/klipper/klippy/
+sync
+
 cp $WORK_DIR/klipper/config/* /usr/data/config/ -rf
+sync
+
+cp $WORK_DIR/8821cu.ko  /usr/prog/modules/8821cu.ko
+sync
+
+cp $WORK_DIR/passwd  /usr/prog/etc/passwd
+sync
+
+cp $WORK_DIR/shadow  /usr/prog/etc/shadow
 sync
 
 cd /usr/prog/PROGRAM/software

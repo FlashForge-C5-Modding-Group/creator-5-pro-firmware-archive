@@ -37,15 +37,7 @@ class MCLIB:
         self.hold_current = int(config.getfloat('hold_current', run_current, minval=0., maxval=run_current)* 1000)
         self.interpolate = config.getboolean('interpolate', True)
         self.stall_threshold = int(config.getfloat('stall_threshold', self.bus_voltage, above=0.)* 1000)
-        self.td1_amp = int(config.getfloat('td1_amp', 0., minval=0., maxval=run_current)* 1000)
-        self.td1_phase1 = int(config.getfloat('td1_phase1', 0.)* 1000)
-        self.td1_phase2 = int(config.getfloat('td1_phase2', 0.)* 1000)
-        self.td2_amp = int(config.getfloat('td2_amp', 0., minval=0., maxval=run_current)* 1000)
-        self.td2_phase1 = int(config.getfloat('td2_phase1', 0.)* 1000)
-        self.td2_phase2 = int(config.getfloat('td2_phase2', 0.)* 1000)
-        self.td4_amp = int(config.getfloat('td4_amp', 0., minval=0., maxval=run_current)* 1000)
-        self.td4_phase1 = int(config.getfloat('td4_phase1', 0.)* 1000)
-        self.td4_phase2 = int(config.getfloat('td4_phase2', 0.)* 1000)
+  
 
         self.printer.register_event_handler("klippy:mcu_identify",
                                             self._handle_mcu_identify)
@@ -55,11 +47,7 @@ class MCLIB:
                                    self.cmd_MCLIB_SET_CURRENT,
                                    desc=self.cmd_MCLIB_SET_CURRENT_help)
 
-        self.set_resonance_damp_cmd = None
-        if self.name != 'extruder':
-            gcode.register_mux_command("MCLIB_SET_RESONANCE_DAMP", "STEPPER", self.name,
-                                   self.cmd_MCLIB_SET_RESONANCE_DAMP,
-                                   desc=self.cmd_MCLIB_SET_RESONANCE_DAMP_help)
+
 
     def _handle_mcu_identify(self):
         # Lookup stepper object
@@ -83,20 +71,9 @@ class MCLIB:
         self.mcu.add_config_cmd("mclib_config_stalldetect oid=%d stallthrs=%u" % (
             self.oid, self.stall_threshold))
 
-        if self.name != 'extruder':
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d tdx=1 amp=%u phase1=%u phase2=%u"% (
-                self.oid, self.td1_amp, self.td1_phase1, self.td1_phase2))
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d tdx=2 amp=%u phase1=%u phase2=%u"% (
-                self.oid, self.td2_amp, self.td2_phase1, self.td2_phase2))
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d tdx=4 amp=%u phase1=%u phase2=%u"% (
-                self.oid, self.td4_amp, self.td4_phase1, self.td4_phase2))
-
         self.set_current_cmd = self.mcu.lookup_command(
             "mclib_set_current oid=%c run_current=%u hold_current=%u")
 
-        if self.name != 'extruder':
-            self.set_resonance_damp_cmd = self.mcu.lookup_command(
-                "mclib_set_resonance_damp oid=%c tdx=%c amp=%u phase1=%u phase2=%u")
 
     cmd_MCLIB_SET_CURRENT_help = "Sets the current of stepper in mclib "
     def cmd_MCLIB_SET_CURRENT(self, gcmd):
@@ -112,27 +89,6 @@ class MCLIB:
             return
         self.set_current_cmd.send([self.oid, run_current, hold_current])
 
-    cmd_MCLIB_SET_RESONANCE_DAMP_help = "Sets the stepper resonance damp paramters in mclib"
-    def cmd_MCLIB_SET_RESONANCE_DAMP(self, gcmd):
-        if self.name == 'extruder':
-            raise gcmd.error("Extruder don't support resonance damping")
-        tdx = gcmd.get_int('TDX', 1, minval=1, maxval=4) # 1, 2, 4
-        if tdx not in [1, 2, 4]:
-            raise gcmd.error("Invalid tdx, only 1, 2 or 4 supported!")
-        amp = int(gcmd.get_float('AMP', None, minval=0., maxval=MAX_CURRENT)* 1000)
-        phase1 = int(gcmd.get_float('PHASE1', None)* 1000)
-        phase2 = int(gcmd.get_float('PHASE2', None)* 1000)
-
-        if self.set_resonance_damp_cmd is None:
-            # Send setup message via mcu initialization
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d td=1 amp=%u phase1=%u phase2=%u"
-                                    % (self.oid, self.td1_amp, self.td1_phase1, self.td1_phase2))
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d td=2 amp=%u phase1=%u phase2=%u"
-                                    % (self.oid, self.td2_amp, self.td2_phase1, self.td2_phase2))
-            self.mcu.add_config_cmd("mclib_set_resonance_damp oid=%d td=4 amp=%u phase1=%u phase2=%u"
-                                    % (self.oid, self.td4_amp, self.td4_phase1, self.td4_phase2))
-            return
-        self.set_resonance_damp_cmd.send([self.oid, tdx, amp, phase1, phase2])
 
 def load_config_prefix(config):
     return MCLIB(config)

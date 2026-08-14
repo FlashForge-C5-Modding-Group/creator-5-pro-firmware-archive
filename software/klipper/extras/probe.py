@@ -344,7 +344,7 @@ class ProbeSessionHelper:
                 pin_state = self.query_probe()
                 logging.warning("[%d]_probe:[%s]",i, pin_state)
                 if pin_state == "TRIGGERED":
-                    self.gcode.run_script_from_command("GET_BASIC_PARAM")
+                    #self.gcode.run_script_from_command("GET_BASIC_PARAM")
                     reactor.pause(reactor.monotonic() + 0.500)
                     if i == 5:
                         error = '{"coded": "0088-0000-0000-0001", "msg":"Probe triggered prior to movement"}'
