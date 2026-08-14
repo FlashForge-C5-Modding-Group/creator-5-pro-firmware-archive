@@ -669,6 +669,7 @@
 			dma-names = "tx", "rx";
 			pinctrl-names = "default";
 			pinctrl-0 = <0xd>;
+			ingenic,rs485-tx-enable-gpio = <0x5 0x3 0x0 0x4>;
 		};
 		serial@0x10034000 {
 			compatible = "ingenic,8250-uart";
@@ -681,7 +682,6 @@
 			dma-names = "tx", "rx";
 			pinctrl-names = "default";
 			pinctrl-0 = <0xe>;
-			ingenic,rs485-tx-enable-gpio = <0x5 0x3 0x0 0x4>;
 		};
 		serial@0x10035000 {
 			compatible = "ingenic,8250-uart";

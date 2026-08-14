@@ -81,7 +81,7 @@ if [ ${DIR_COUNT} -gt 2 ];then
         rm -r /usr/prog/PROGRAM/kernel/$KERNEL_VERSION
 fi
 
-
 sync
+sleep 5
 
 exit 0

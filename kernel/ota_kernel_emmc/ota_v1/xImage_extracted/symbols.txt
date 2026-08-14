@@ -13937,6 +13937,7 @@ T iterate_fd
 T iterate_mounts
 T iterate_supers
 T iterate_supers_type
+t iterate_tty_read
 T iunique
 t iw_handler_get_iwstats
 T iwe_stream_add_event
