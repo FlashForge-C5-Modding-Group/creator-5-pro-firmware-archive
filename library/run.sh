@@ -65,20 +65,37 @@ if [ -f $WORK_DIR/zip/font.zip  ]; then
 fi
 
 # copy reset factory model
-if [ -f $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf  ]; then
+if [ -f "$GCODE_DIR/Doberman‌_PLA_3h26m.gcode" ]; then
+        rm "$GCODE_DIR/Doberman‌_PLA_3h26m.gcode"
+	sync
+fi
+
+
+if [ -f $GCODE_DIR/3DBenchy_PLA_40m32s.gcode ] || [ -f $GCODE_DIR/3DBenchy_PLA_50m28s.gcode ] || [ -f $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf ]; then
+        rm $GCODE_DIR/3DBenchy_PLA_40m32s.gcode
+        rm $GCODE_DIR/3DBenchy_PLA_50m28s.gcode
         rm $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf
 	sync
 	cp $WORK_DIR/model/C5P_3DBenchy_PLA_53m29s.gcode.3mf $GCODE_DIR/
 	sync
 fi
 
-if [ -f $GCODE_DIR/Logo_PLA_17m6s.gcode.3mf  ]; then
+if [ -f $GCODE_DIR/Logo_PLA_10m43s.gcode ] || [ -f $GCODE_DIR/Logo_PLA_17m6s.gcode.3mf ]; then
+        rm $GCODE_DIR/Logo_PLA_10m43s.gcode
         rm $GCODE_DIR/Logo_PLA_17m6s.gcode.3mf
 	sync
 	cp $WORK_DIR/model/C5P_logo-06_PLA_17m45s.gcode.3mf $GCODE_DIR/
 	sync
 fi
 
+if [ ! -d "/usr/prog/ffmpeg-402" ]; then
+    echo "unzip ffmpeg-4.0.2..."
+    unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
+    sync
+fi
+
+sync
+sleep 3
 
 cd /usr/prog/PROGRAM/library/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
@@ -90,6 +107,6 @@ if [ ${DIR_COUNT} -gt 2 ];then
 fi
 
 sync
-sleep 3
+sleep 5
 
 exit 0
