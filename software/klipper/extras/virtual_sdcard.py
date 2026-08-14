@@ -3,12 +3,17 @@
 # Copyright (C) 2018-2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import os, sys, logging, io
+import os, sys, logging, io, re
 
-VALID_GCODE_EXTS = ['gcode', 'g', 'gco','gx']
-VALID_GCODE_T = ['T0', 'T1', 'T2', 'T3', 'T4', 'T5']
-VALID_M104_T = ['M104', 'M109']
+VALID_GCODE_EXTS = {'gcode', 'g', 'gco', 'gx'}
+VALID_GCODE_T = frozenset(['T0', 'T1', 'T2', 'T3', 'T4', 'T5'])
+VALID_M104_T = frozenset(['M104', 'M109'])
 EXTRUDER_COUNT = 4
+
+_REGEX_T_VALUE = re.compile(r'T(\d+)')
+_REGEX_S_VALUE = re.compile(r'S(\d+)')
+_REGEX_SET_VELOCITY = re.compile(r'SET_VELOCITY_LIMIT')
+_REGEX_SET_PA = re.compile(r'SET_PRESSURE_ADVANCE')
 
 DEFAULT_ERROR_GCODE = """
 {% if 'heaters' in printer %}
@@ -35,6 +40,8 @@ class VirtualSD:
         self.work_timer = None
         self.load_channel = 0
         self.print_channel = 0
+        self.speed_factor = 100
+        self.speed_factor_enable = 0
         self.change_filament = False
         self.enable_ffm = False
         self.channel_x = 0.0;
@@ -116,6 +123,9 @@ class VirtualSD:
         self.gcode.register_command(
             "SET_FAN_M106", self.cmd_SET_FAN_M106,
             desc=self.cmd_SET_FAN_M106_help)
+        self.gcode.register_command(
+            "SET_SPEED_PERCENT", self.cmd_SET_SPEED_PERCENT,
+            desc=self.cmd_SET_SPEED_PERCENT_help)    
     def handle_shutdown(self):
         if self.work_timer is not None:
             self.must_pause_work = True
@@ -137,25 +147,33 @@ class VirtualSD:
     def get_file_list(self, check_subdirs=False):
         if check_subdirs:
             flist = []
-            for root, dirs, files in os.walk(
-                    self.sdcard_dirname, followlinks=True):
+            prefix_len = len(self.sdcard_dirname) + 1
+            for root, dirs, files in os.walk(self.sdcard_dirname, followlinks=True):
                 for name in files:
-                    ext = name[name.rfind('.')+1:]
+                    dot_pos = name.rfind('.')
+                    if dot_pos == -1:
+                        continue
+                    ext = name[dot_pos + 1:]
                     if ext not in VALID_GCODE_EXTS:
                         continue
                     full_path = os.path.join(root, name)
-                    r_path = full_path[len(self.sdcard_dirname) + 1:]
+                    r_path = full_path[prefix_len:]
                     size = os.path.getsize(full_path)
                     flist.append((r_path, size))
-            return sorted(flist, key=lambda f: f[0].lower())
+            flist.sort(key=lambda f: f[0].lower())
+            return flist
         else:
             dname = self.sdcard_dirname
             try:
-                filenames = os.listdir(self.sdcard_dirname)
-                return [(fname, os.path.getsize(os.path.join(dname, fname)))
-                        for fname in sorted(filenames, key=str.lower)
-                        if not fname.startswith('.')
-                        and os.path.isfile((os.path.join(dname, fname)))]
+                filenames = os.listdir(dname)
+                result = []
+                for fname in sorted(filenames, key=str.lower):
+                    if fname.startswith('.'):
+                        continue
+                    full_path = os.path.join(dname, fname)
+                    if os.path.isfile(full_path):
+                        result.append((fname, os.path.getsize(full_path)))
+                return result
             except:
                 logging.exception("virtual_sdcard get_file_list")
                 raise self.gcode.error("Unable to get file list")
@@ -299,6 +317,10 @@ class VirtualSD:
         self.adjust_M106 = gcmd.get_int('ADJUSTED')
         self.factor_M106 = gcmd.get_int('FACTOR')
     cmd_SET_FAN_M106_help = "print change M106"
+    def cmd_SET_SPEED_PERCENT(self, gcmd):
+        self.speed_factor = gcmd.get_int('PERCENT')
+        self.speed_factor_enable = gcmd.get_int('ENABLE')
+    cmd_SET_SPEED_PERCENT_help = "print change speed M220 Sxx"
     def cmd_M20(self, gcmd):
         # List SD card
         files = self.get_file_list()
@@ -369,13 +391,20 @@ class VirtualSD:
         self.next_file_position = pos
     def is_cmd_from_sd(self):
         return self.cmd_from_sd
-    def extract_between_chars(self,src, char1, char2):
-        try:
-            start = src.index(char1) + 1
-            end = src.index(char2, start)
-            return src[start:end]
-        except ValueError:
+    _REGEX_COORD_X = re.compile(r'X([\d.]+)')
+    _REGEX_COORD_Y = re.compile(r'Y([\d.]+)')
+    _REGEX_COORD_Z = re.compile(r'Z([\d.]+)')
+
+    def extract_coord(self, line, coord_char):
+        if coord_char == 'X':
+            match = self._REGEX_COORD_X.search(line)
+        elif coord_char == 'Y':
+            match = self._REGEX_COORD_Y.search(line)
+        elif coord_char == 'Z':
+            match = self._REGEX_COORD_Z.search(line)
+        else:
             return '0'
+        return match.group(1) if match else '0'
     # Background work timer
     def work_handler(self, eventtime):
         logging.info("Starting SD card print (position %d)", self.file_position)
@@ -389,30 +418,27 @@ class VirtualSD:
         self.print_stats.note_start()
         gcode_mutex = self.gcode.get_mutex()
         partial_input = ""
-        velocity_str = ""
         lines = []
-        exclude_line = []
+        exclude_line = ""
         exclude_flag = False
         error_message = None
         while not self.must_pause_work:
             if not lines:
-                # Read more data
                 try:
-                    data = self.current_file.read(8192)
+                    data = self.current_file.read(32768)
                 except:
                     logging.exception("virtual_sdcard read")
                     break
                 if not data:
-                    # End of file
                     self.current_file.close()
                     self.current_file = None
                     logging.info("Finished SD card print")
                     self.gcode.respond_raw("Done printing file")
                     break
-                lines = data.split('\n')
-                lines[0] = partial_input + lines[0]
-                partial_input = lines.pop()
-                lines.reverse()
+                raw_lines = data.split('\n')
+                raw_lines[0] = partial_input + raw_lines[0]
+                partial_input = raw_lines.pop()
+                lines.extend(reversed(raw_lines))
                 self.reactor.pause(self.reactor.NOW)
                 continue
             # Pause if any other request is pending in the gcode class
@@ -428,194 +454,142 @@ class VirtualSD:
                 next_file_position = self.file_position + len(line) + 1
             self.next_file_position = next_file_position
             
-            # Start: Convert extruder index to 0~3
-            if ((self.m104 in line) or (self.m109 in line)) and ("T" in line) and (line.startswith(";") == False) :
-                if ';' in line :
-                    index = line.index(';')
-                    line = line[:index]
-                parts = line.split()
-                for i in range(len(parts)):
-                    if parts[i][0] == 'T':
-                        ex_index = parts[i][1:]
-                        if ex_index.isdigit() :
-                            if self.need_check_ex or self.no_filament_check_ex :
-                                strBase = "T" + str(ex_index)
-                                try :
-                                    iBase = self.gcode_ex_used.index(strBase)
-                                except ValueError :
-                                    iBase = -1
-                                    parts[i] = f'T{int(ex_index) % EXTRUDER_COUNT}'
-                                    logging.info("T:Convert exIndex not found (%s)",old_line)
-                                if iBase >= 0 :
-                                    strChanged = self.gcode_ex_used_changed[iBase]
-                                    parts[i] = strChanged
-                            else :
-                                parts[i] = f'T{int(ex_index) % EXTRUDER_COUNT}'
-                        break
-                new_line = ' '.join(parts)
-                logging.info("Temp:Convert exIndex from : (%s), to : (%s)",line,new_line)
-                line = new_line
-                
-            if line.startswith("T") :
-                old_line = line
-                ex_index = old_line[old_line.rfind('T')+1:].strip()
-                if ex_index.isdigit():
-                    if self.need_check_ex or self.no_filament_check_ex :
-                        strBase = "T" + str(ex_index)
-                        try :
-                            iBase = self.gcode_ex_used.index(strBase)
-                        except ValueError :
-                            iBase = -1
-                            str_int = (int(ex_index)) % EXTRUDER_COUNT
-                            line = "T" + str(str_int)
-                        if iBase >= 0 :
-                            strChanged = self.gcode_ex_used_changed[iBase]
-                            line = strChanged
-                    else :
-                        int_t = (int(ex_index)) % EXTRUDER_COUNT
-                        line = "T" + str(int_t)
-                    logging.info("T:Convert exIndex from : (%s), to : (%s)",old_line,line)
-            # End: Convert extruder index to 0~3
-            
-            # get SET_VELOCITY_LIMIT from gcode 
-            if ('SET_VELOCITY_LIMIT' in line) and (line.startswith(";") == False) :
-                velocity_str = line.rstrip()
-                self.set_velocity_limit = velocity_str
-            if ('SET_PRESSURE_ADVANCE' in line) and ((line.startswith(";") == False) and (self.pa_enable == 1)) :
-                if (self.load_channel == 0) :
-                    pa_value = self.pa_value_t0
-                elif (self.load_channel == 1) :
-                    pa_value = self.pa_value_t1
-                elif (self.load_channel == 2) :
-                    pa_value = self.pa_value_t2
-                elif (self.load_channel == 3) :
-                    pa_value = self.pa_value_t3
+            if not line.startswith(";"):
+                t_match = _REGEX_T_VALUE.search(line)
+                if t_match:
+                    ex_index = t_match.group(1)
+                    if self.need_check_ex or self.no_filament_check_ex:
+                        str_base = "T" + ex_index
+                        try:
+                            i_base = self.gcode_ex_used.index(str_base)
+                        except ValueError:
+                            i_base = -1
+                        if i_base >= 0:
+                            changed_ex = self.gcode_ex_used_changed[i_base]
+                            line = line.replace(str_base, changed_ex, 1)
+                        else:
+                            line = line.replace(str_base, f'T{int(ex_index) % EXTRUDER_COUNT}', 1)
+                    else:
+                        line = line.replace(f'T{ex_index}', f'T{int(ex_index) % EXTRUDER_COUNT}', 1)
+
+                raw = line.lstrip()
+                if raw.startswith("S"):
+                    if _REGEX_SET_VELOCITY.search(line):
+                        self.set_velocity_limit = line.rstrip()
+                    elif _REGEX_SET_PA.search(line) and self.pa_enable == 1:
+                        pa_values = [self.pa_value_t0, self.pa_value_t1, 
+                                     self.pa_value_t2, self.pa_value_t3]
+                        pa_value = pa_values[self.load_channel] if self.load_channel < 4 else self.pa_value_t0
+                        if pa_value > 10.0:
+                            self.gcode.run_script(line)
+                        else:
+                            self.gcode.run_script(f"SET_PRESSURE_ADVANCE ADVANCE={pa_value}")
+                        self.file_position = self.next_file_position
+                        continue
+
+                if 'M106' in line:
+                    comment_pos = line.find(';')
+                    if comment_pos != -1:
+                        line = line[:comment_pos]
+                    line = line.strip()
+                    s_match = _REGEX_S_VALUE.search(line)
+                    if s_match:
+                        speed = int(s_match.group(1))
+                        if 'P2' in line and self.adjust_M106P2 == 1:
+                            target_speed = speed + int(self.factor_M106P2 * 255 / 100)
+                            self.gcode.run_script(f"M106 P2 S{target_speed}")
+                            self.file_position = self.next_file_position
+                            continue
+                        elif 'P' not in line and self.adjust_M106 == 1:
+                            target_speed = speed + int(self.factor_M106 * 255 / 100)
+                            self.gcode.run_script(f"M106 S{target_speed}")
+                            self.file_position = self.next_file_position
+                            continue
+                            
+                #if self.speed_factor_enable == 1 and 'M220' in line:
+                #    line = (f"M220 S{self.speed_factor}")
                     
-                if pa_value > 10.0 :
-                    self.gcode.run_script(line)
-                    #logging.info("gcode pa_value: (%s), self.load_channel: (%d)",line,self.load_channel)
-                else :
-                    str_pa = "SET_PRESSURE_ADVANCE ADVANCE=" + str(pa_value)
-                    self.gcode.run_script(str_pa)
-                    #logging.info("PATest-set_pa_advance: (%s), self.load_channel: (%d)",str_pa,self.load_channel)
-                self.file_position = self.next_file_position
-                continue
-            #check adjust M106 P2 from firmware
-            if ('M106' in line) and (line.startswith(";") == False) :
-                if ';' in line :
-                    index = line.index(';')
-                    line = line[:index]
-                line = line.strip()
-                if ('P2' in line) and (self.adjust_M106P2 == 1) :
-                    speed = int(line.split('S')[-1])
-                    targetSpeed = speed + int(self.factor_M106P2 * 255 / 100)
-                    self.gcode.run_script("M106 P2 S" + str(targetSpeed))
-                    #logging.info("M106 P2, speed: (%d), starget speed: (%d)",speed,targetSpeed)
+                if self.after_channel_g1 and ('G1' in line or 'G0' in line):
+                    comment_pos = line.find(';')
+                    if comment_pos != -1:
+                        line = line[:comment_pos]
+                    line = line.strip()
+                    
+                    self.channel_pause_is_z = 'Z' in line
+                    self.channel_pause_is_x = 'X' in line
+                    self.channel_pause_is_y = 'Y' in line
+                    
+                    if self.channel_pause_is_z:
+                        self.channel_pause_z = self.extract_coord(line, 'Z')
+                    if self.channel_pause_is_x:
+                        self.channel_pause_x = self.extract_coord(line, 'X')
+                    if self.channel_pause_is_y:
+                        self.channel_pause_y = self.extract_coord(line, 'Y')
+                    
+                    if self.channel_pause_is_y and self.channel_pause_is_x:
+                        self.gcode.run_script(f"G1 X{self.channel_pause_x} Y{self.channel_pause_y} F36000")
+                        if self.channel_pause_is_z:
+                            self.gcode.run_script(f"G1 Z{self.channel_pause_z} F500")
+                        else:
+                            self.gcode.run_script(f"G1 Z{self.channel_z} F500")
+                        self.after_channel_g1 = False
+                        self.channel_pause_is_z = False
+                        self.channel_pause_is_y = False
+                        self.channel_pause_is_x = False
+                    self.doingChangeEx = False
                     self.file_position = self.next_file_position
                     continue
-                if ('P' not in line) and (self.adjust_M106 == 1) :
-                    speed = int(line.split('S')[-1])
-                    targetSpeed = speed + int(self.factor_M106 * 255 / 100)
-                    self.gcode.run_script("M106 S" + str(targetSpeed))
-                    #logging.info("M106, speed: (%d), starget speed: (%d)",speed,targetSpeed)
-                    self.file_position = self.next_file_position
-                    continue
-            #check after change channel find g1 (go g1 here)
-            if (self.after_channel_g1) and (('G1' in line) or ('G0' in line)) and (line.startswith(";") == False) :
-                if ';' in line :
-                    index = line.index(';')
-                    line = line[:index]
-                line = line.strip()
-                line = line + " "
-                #logging.info("Before change channel first go G1 (%s)",line)
-                if 'Z' in line :
-                    self.channel_pause_z = self.extract_between_chars(line,'Z',' ')
-                    self.channel_pause_is_z = True
-                if 'X' in line :
-                    self.channel_pause_x = self.extract_between_chars(line,'X',' ')
-                    self.channel_pause_is_x = True
-                if 'Y' in line :
-                    self.channel_pause_y = self.extract_between_chars(line,'Y',' ')
-                    self.channel_pause_is_y = True
-                if self.channel_pause_is_y and self.channel_pause_is_x :
-                    pause_gcode = "G1" + " X" + self.channel_pause_x + " Y" + self.channel_pause_y + " F36000"
-                    #logging.info("After change channel first go pause_gcode_xy (%s)",pause_gcode)
-                    self.gcode.run_script(pause_gcode)
-                    if self.channel_pause_is_z :
-                        pause_gcode = "G1" + " Z" + self.channel_pause_z + " F500"
-                        #logging.info("After change channel first go pause_gcode_z (gcode z) (%s)",pause_gcode)
-                        self.gcode.run_script(pause_gcode)
-                    else :
-                        pause_gcode = "G1" + " Z" + str(self.channel_z) + " F500"
-                        #logging.info("After change channel first go pause_gcode_z (channel_z): (%s)",pause_gcode)
-                        self.gcode.run_script(pause_gcode)    
-                    self.after_channel_g1 = False
-                    self.channel_pause_is_z = False
-                    self.channel_pause_is_y = False
-                    self.channel_pause_is_x = False
-                self.doingChangeEx = False
-                self.file_position = self.next_file_position
-                continue
-            #end check after change channel find g1 (go g1 here)
-            #check m104/m109 whitch no extruder
-            if ((self.m104 in line) or (self.m109 in line)) and ("T" not in line) and (line.startswith(";") == False) :
-                if ';' in line :
-                    index = line.index(';')
-                    line = line[:index]
-                line = line.strip() + " T" + str(self.print_channel)
-            #end check m104/m109 whitch extruder
-            if line.startswith("EXCLUDE_OBJECT_START") or line.startswith("EXCLUDE_OBJECT_END") :
-                exclude_line = []
-                exclude_line = line
-            if "WIPE_TOWER_START" in line :
-                exclude_line = str(exclude_line)
-                if exclude_line.startswith("EXCLUDE_OBJECT_START") :
-                    #logging.info("======change head, start send exclude_object_end")
-                    exclude_line = exclude_line.replace("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END")
-                    #logging.info("exclude_line=[%s]", exclude_line)
-                    self.gcode.run_script(exclude_line)
-                    exclude_flag = True
-            if "WIPE_TOWER_END" in line :
-                exclude_line = str(exclude_line)
-                if exclude_flag :
+
+                if (self.m104 in line or self.m109 in line) and 'T' not in line:
+                    comment_pos = line.find(';')
+                    if comment_pos != -1:
+                        line = line[:comment_pos]
+                    line = line.strip() + " T" + str(self.print_channel)
+
+                if line.startswith("EXCLUDE_OBJECT_START"):
+                    exclude_line = line
+                elif line.startswith("EXCLUDE_OBJECT_END"):
+                    exclude_line = line
+
+                if "WIPE_TOWER_START" in line:
+                    if exclude_line and exclude_line.startswith("EXCLUDE_OBJECT_START"):
+                        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END")
+                        self.gcode.run_script(exclude_line)
+                        exclude_flag = True
+
+                if "WIPE_TOWER_END" in line and exclude_flag:
                     exclude_flag = False
-                    #logging.info("======change back,  send exclude_object_start")
-                    exclude_line = exclude_line.replace("EXCLUDE_OBJECT_END", "EXCLUDE_OBJECT_START")
-                    #logging.info("exclude_line=[%s]", exclude_line)
-                    self.gcode.run_script(exclude_line)
-            if line in VALID_GCODE_T and line.startswith("T"):
-                self.print_channel = int(line[line.rfind('T')+1:])
-                if self.print_channel != self.load_channel:
-                    self.gcode.run_script("M400")
-                    self.change_filament = True
-                    self.doingChangeEx = True
-                    #if self.set_velocity_limit != "" :
-                    #    limit = "SET_VELOCITY_LIMIT ACCEL=30000"
-                    #    self.gcode.run_script(limit)
-                        #logging.info("Change channel update accel:%s",limit)
-                    while True:
-                        if not self.change_filament:
-                           self.gcode.run_script(self.set_velocity_limit)
-                           logging.info("Change channel complete back to gcode accel:%s",self.set_velocity_limit)
-                           break 
-                        self.reactor.pause(self.reactor.monotonic() + 0.05)
-                    self.after_channel_g1 = True
-                self.load_channel = self.print_channel
-                self.change_filament = False
-                self.file_position = self.next_file_position
-                continue         
-            try:
-                self.gcode.run_script(line)
-            except self.gcode.error as e:
-                error_message = str(e)
+                    if exclude_line:
+                        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_END", "EXCLUDE_OBJECT_START")
+                        self.gcode.run_script(exclude_line)
+
+                if line.startswith("T") and line in VALID_GCODE_T:
+                    self.print_channel = int(line[1:])
+                    if self.print_channel != self.load_channel:
+                        self.gcode.run_script("M400")
+                        self.change_filament = True
+                        self.doingChangeEx = True
+                        while self.change_filament:
+                            self.reactor.pause(self.reactor.monotonic() + 0.05)
+                        self.gcode.run_script(self.set_velocity_limit)
+                        self.after_channel_g1 = True
+                    self.load_channel = self.print_channel
+                    self.change_filament = False
+                    self.file_position = self.next_file_position
+                    continue
+
                 try:
-                    self.gcode.run_script(self.on_error_gcode.render())
+                    self.gcode.run_script(line)
+                except self.gcode.error as e:
+                    error_message = str(e)
+                    try:
+                        self.gcode.run_script(self.on_error_gcode.render())
+                    except:
+                        logging.exception("virtual_sdcard on_error")
+                    break
                 except:
-                    logging.exception("virtual_sdcard on_error")
-                break
-            except:
-                logging.exception("virtual_sdcard dispatch")
-                break
+                    logging.exception("virtual_sdcard dispatch")
+                    break
             self.cmd_from_sd = False
             self.file_position = self.next_file_position
             # Do we need to skip around?

@@ -202,7 +202,10 @@ DRIP_SEGMENT_TIME = 0.050
 DRIP_TIME = 0.100
 class DripModeEndSignal(Exception):
     pass
-
+# mute mode
+MUTE_ACCEL = 5000 
+MUTE_MODE_ENABLE  = 0xFFFF
+MUTE_MODE_DISABLE = 0xEEEE
 # Main code to track events (and their timing) on the printer toolhead
 class ToolHead:
     def __init__(self, config):
@@ -253,6 +256,11 @@ class ToolHead:
         # Kinematic step generation scan window time tracking
         self.kin_flush_delay = SDS_CHECK_TIME
         self.kin_flush_times = []
+        
+        # mute mode
+        self.user_max_accel = self.max_accel
+        self.mute_mode = False
+        
         # Setup iterative solver
         ffi_main, ffi_lib = chelper.get_ffi()
         self.trapq = ffi_main.gc(ffi_lib.trapq_alloc(), ffi_lib.trapq_free)
@@ -634,12 +642,16 @@ class ToolHead:
                                                  / self.max_accel))
         if max_velocity is not None:
             self.max_velocity = max_velocity
-        if max_accel is not None:
+        if max_accel is not None: 
             self.max_accel = max_accel
+            self.user_max_accel = max_accel
         if square_corner_velocity is not None:
             self.square_corner_velocity = square_corner_velocity
         if min_cruise_ratio is not None:
             self.min_cruise_ratio = min_cruise_ratio
+        # mute mode
+        if self.mute_mode:
+            self.max_accel = min(self.max_accel, MUTE_ACCEL)
         self._calc_junction_deviation()
         #msg = ("max_velocity: %.6f\n"
         #       "max_accel: %.6f\n"
@@ -654,6 +666,21 @@ class ToolHead:
     def cmd_M204(self, gcmd):
         # Use S for accel
         accel = gcmd.get_float('S', None, above=0.)
+        if (accel != MUTE_MODE_ENABLE) and (accel != MUTE_MODE_DISABLE) and (accel is not None):
+                self.user_max_accel = accel
+                self.max_accel = accel
+        if accel == MUTE_MODE_ENABLE:
+            self.mute_mode = True
+            # self.max_velocity = min(self.max_velocity, MUTE_VELOCITY)
+            self.max_accel = min(self.max_accel , MUTE_ACCEL)
+            self._calc_junction_deviation()
+            return
+        elif accel == MUTE_MODE_DISABLE:
+            self.mute_mode = False
+            # self.max_velocity = self.user_max_velocity
+            self.max_accel = self.user_max_accel
+            self._calc_junction_deviation()
+            return
         if accel is None:
             # Use minimum of P and T for accel
             p = gcmd.get_float('P', None, above=0.)
@@ -663,7 +690,11 @@ class ToolHead:
                                   % (gcmd.get_commandline(),))
                 return
             accel = min(p, t)
-        self.max_accel = accel
+            self.user_max_accel = accel
+        if self.mute_mode:
+            self.max_accel = min(accel, MUTE_ACCEL)
+        else:
+            self.max_accel = accel
         self._calc_junction_deviation()
     def cmd_GET_MCU_VERSION(self, gcmd):
         mcu = self.printer.lookup_object("mcu")
