@@ -7,6 +7,7 @@
 set -x
 
 WORK_DIR=`dirname $0`
+GCODE_DIR="/usr/data/gcodes"
 
 #检测机器的架构,错误马上退出
 CHECH_ARCH=`uname -m`
@@ -62,6 +63,22 @@ if [ -f $WORK_DIR/zip/font.zip  ]; then
 	unzip -o $WORK_DIR/zip/font.zip -d /usr/data/firmwareRes/
 	sync
 fi
+
+# copy reset factory model
+if [ -f $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf  ]; then
+        rm $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf
+	sync
+	cp $WORK_DIR/model/C5P_3DBenchy_PLA_53m29s.gcode.3mf $GCODE_DIR/
+	sync
+fi
+
+if [ -f $GCODE_DIR/Logo_PLA_17m6s.gcode.3mf  ]; then
+        rm $GCODE_DIR/Logo_PLA_17m6s.gcode.3mf
+	sync
+	cp $WORK_DIR/model/C5P_logo-06_PLA_17m45s.gcode.3mf $GCODE_DIR/
+	sync
+fi
+
 
 cd /usr/prog/PROGRAM/library/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
