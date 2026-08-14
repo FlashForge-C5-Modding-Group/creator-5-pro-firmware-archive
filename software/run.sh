@@ -118,4 +118,6 @@ sync
 rm /usr/data/logs/printer*.log*
 sync
 
+sleep 3
+
 exit 0
