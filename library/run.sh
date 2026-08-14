@@ -54,6 +54,7 @@ if [ -f $WORK_DIR/zip/img.zip  ]; then
         #rm /usr/data/firmwareRes/img -rf
 	#sync
 	unzip -o $WORK_DIR/zip/img.zip -d /usr/data/firmwareRes/
+	sleep 3
 	sync
 fi
 
@@ -61,6 +62,7 @@ if [ -f $WORK_DIR/zip/font.zip  ]; then
         #rm /usr/data/firmwareRes/font -rf
 	#sync
 	unzip -o $WORK_DIR/zip/font.zip -d /usr/data/firmwareRes/
+	sleep 3
 	sync
 fi
 
