@@ -1,0 +1,12 @@
+name: Linux-5.10.186+
+os: linux (5)
+architecture: mips (5)
+type: kernel (2)
+compression: none (0)
+load-address: 0x80f00000
+entry-point: 0x80f00000
+data-size: 4837376
+data-crc32: 0x416796ae (ok)
+header-crc32: 0x31c49929 (ok)
+timestamp: 2024-10-29T02:37:03Z
+linux-banner: Linux version 5.10.186+ (linux@ubuntu) (mips-linux-gnu-gcc (Ingenic MIPS Linux Tools GCC12.1 Release6.0.1 Default xburst2 glibc2.33 support MXA build at 2023.07-28 11:02:00) 12.1.0, GNU ld (GNU Binutils) 2.39) #126 SMP PREEMPT Mon Oct 28 18:48:28 PDT 2024
