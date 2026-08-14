@@ -9,7 +9,7 @@ f7db0b45803bd3369cd778d8af9bb891  ./8821cu.ko
 a382caff02e2e029f68586457eeae043  ./klipper/klippy/configfile.py
 eb0d3c75a313f311bfd62e9ba5ce37d2  ./klipper/klippy/klippy.py
 1be38d94d58f53516948f8632c45f119  ./klipper/klippy/toolhead.py
-38f4160ce1e00f3a642923e3420b57ec  ./klipper/klippy/mcu.py
+e529f6f82c637ca22505df8132f2e72a  ./klipper/klippy/mcu.py
 867a429d36b2d7567ab92b8fb559de3d  ./klipper/klippy/queuelogger.py
 c2dcba03196049ac8c80826c120e9fe2  ./klipper/klippy/serialhdl.py
 f920bd64b809b40c6c10495b741cc5a6  ./klipper/kinematics/extruder.py
@@ -23,8 +23,9 @@ ed5a424850518bf0b656498d063c5cb2  ./klipper/extras/hd_home.py
 e5b4ea193e10a6c8191a1d56c8b82667  ./klipper/extras/safe_z_home.py
 46c07e9131c3631d975738b87f8f0350  ./klipper/extras/homing.py
 c42e237813a24af7bf9389c35182dd68  ./klipper/extras/mclib.py
-05a44a220942c0504f947e179bf45e27  ./klipper/extras/heaters.py
+96f817dc950eabb8cf646c3efcd3581b  ./klipper/extras/heaters.py
 903cd0b9a0a1bc12cb9b671b582e1f09  ./klipper/extras/virtual_sdcard.py
+2388d92f16297feced819cc7b961324b  ./klipper/extras/verify_heater.py
 b708fdeb1dcc24d31e79af1b49947465  ./klipper/extras/e_stop.py
 edc6cd7ec884704bbbde2e57ab9f360b  ./klipper/extras/query_endstops.py
 385ae0518bbacf73b191da8676f6787d  ./klipper/extras/stepper_resonance_tester.py
@@ -43,5 +44,5 @@ f3f64cab4a68964f95432dccb6dac8da  ./klipper/config/printer.motor.cfg
 db3b64ffcb5cb5d3236651395e008e1f  ./klipper/config/printer.macro.cfg
 500299a5763e707fcf73f24abd520883  ./sys_start.sh
 a0d28f1adcd2218dcf52b28afba97357  ./app_startup.sh
-2c84409563be154ebc04fb9c3bfa2aa7  ./firmwareExe
+4e87f91630530e54bcf15dc6dee6d09b  ./firmwareExe
 cc30db1fa76ebb2ebf52181639470767  ./freecach.sh

@@ -638,6 +638,13 @@ class MCU:
         diff = count*tick_sumsq - tick_sum**2
         self._mcu_tick_stddev = c * math.sqrt(max(0., diff))
         self._mcu_tick_awake = tick_sum / self._mcu_freq
+    def alarm_update(self, msg):
+        if 'ADC out of range' in msg:
+            pheaters = self._printer.lookup_object('heaters')
+            gcode = self._printer.lookup_object('gcode')
+            for name, heater in pheaters.heaters.items():
+                if heater.last_temp > heater.max_temp-10 or heater.last_temp < heater.min_temp:        
+                    gcode.respond_info("!! ADC out of range : " + name)
     def _handle_shutdown(self, params):
         if self._is_shutdown:
             return
@@ -646,6 +653,7 @@ class MCU:
         if clock is not None:
             self._shutdown_clock = self.clock32_to_clock64(clock)
         self._shutdown_msg = msg = params['static_string_id']
+        self.alarm_update(msg)
         event_type = params['#name']
         self._printer.invoke_async_shutdown(
             "MCU shutdown", {"reason": msg, "mcu": self._name,
