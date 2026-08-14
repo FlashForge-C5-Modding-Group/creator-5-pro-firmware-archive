@@ -338,7 +338,7 @@ class Homing:
                     res = mcu_stop.query_endstop(print_time)
                     logging.warning("z_homing:[%d]:[%d]",i, res)
                     if res:
-                        #gcode.run_script_from_command("GET_BASIC_PARAM")
+                        gcode.run_script_from_command("GET_BASIC_PARAM_EBOARD")
                         reactor.pause(reactor.monotonic() + 0.500)
                         if i == 5:
                             error = '{"coded": "0055-0000-0000-0001", "msg":"Probe triggered prior to movement"}'

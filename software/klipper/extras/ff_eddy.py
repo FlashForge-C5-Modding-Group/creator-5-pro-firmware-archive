@@ -60,8 +60,10 @@ class FF_eddy:
     def cmd_REMOVE_PEEL(self, gcmd):
         action = gcmd.get_int('ACTION', 0)
         peel_data = self.peel_cmd.send([action])
-        gcmd.respond_info(
-            "%s peel_data=%d" % (self.name, peel_data['value']))
+        msg = "Value:[name=%s,value=%d,reserve=%d]" % (self.name, result['value'], result['reserve'])
+        logging.warning("[GET_BASIC_PARAM],MSG[%s]", msg)
+        #gcmd.respond_info(
+        #    "%s peel_data=%d" % (self.name, peel_data['value']))
 
     cmd_SET_TRIGGER_THRESHOLD_help = "Set eddy trigger threshold"
     def cmd_SET_TRIGGER_THRESHOLD(self, gcmd):
