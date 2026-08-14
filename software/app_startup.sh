@@ -9,7 +9,12 @@ insmod /usr/prog/modules/soc_mcu.ko enable_jtag_debug=1
 #wait for USB
 sleep 2
 
+if [ ! -d /usr/prog/etc ];then
+        cp -rf /etc /usr/prog/
+        sync
+fi
 
+mount /usr/prog/etc /etc
 
 for i in 1 2 3 4;
 do

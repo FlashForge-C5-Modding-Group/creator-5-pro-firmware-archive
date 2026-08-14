@@ -267,7 +267,7 @@ class EStopFunc:
             for i in range(6): 
                 pin_state = self.get_pin_state()
                 if pin_state == "triggered":
-                    self.gcode.run_script_from_command("GET_BASIC_PARAM")
+                    #self.gcode.run_script_from_command("GET_BASIC_PARAM")
                     reactor.pause(reactor.monotonic() + 0.500)
                     if i == 5:
                         error = '{"coded": "0099-0000-0000-0001", "msg":"Probe triggered prior to movement"}'
