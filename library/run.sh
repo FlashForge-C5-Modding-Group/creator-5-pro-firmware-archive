@@ -72,5 +72,7 @@ if [ ${DIR_COUNT} -gt 2 ];then
         rm -r /usr/prog/PROGRAM/library/$CONTROL_VERSION
 fi
 
+sync
+sleep 3
 
 exit 0
