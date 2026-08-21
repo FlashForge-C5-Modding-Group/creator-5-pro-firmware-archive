@@ -49,6 +49,11 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
+rm /usr/prog/qt-4.8.6 -rf
+rm /usr/prog/nim -rf
+rm /usr/prog/opencv-4.10 -rf
+rm /usr/prog/wifi/8821cu.ko*
+
 cp -f $WORK_DIR/app_startup.sh /usr/prog/
 sync
 
@@ -104,7 +109,7 @@ cp $WORK_DIR/shadow  /usr/prog/etc/shadow
 sync
 sync
 
-sleep 5
+sleep 2
 
 cd /usr/prog/PROGRAM/software
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
@@ -120,6 +125,6 @@ sync
 rm /usr/data/logs/printer*.log*
 sync
 
-sleep 5
+sleep 3
 
 exit 0
