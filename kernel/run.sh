@@ -49,6 +49,11 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
+rm /usr/prog/qt-4.8.6 -rf
+rm /usr/prog/nim -rf
+rm /usr/prog/opencv-4.10 -rf
+rm /usr/prog/wifi/8821cu.ko*
+
 # 读取SD类型和设备类型
 sd_type=$(cat /sys/block/mmcblk0/device/type)
 dev_type=$(cat /proc/cmdline | awk -F'dev_type=' '{split($2,a," "); print a[1]}')
@@ -82,6 +87,6 @@ if [ ${DIR_COUNT} -gt 2 ];then
 fi
 
 sync
-sleep 5
+sleep 3
 
 exit 0

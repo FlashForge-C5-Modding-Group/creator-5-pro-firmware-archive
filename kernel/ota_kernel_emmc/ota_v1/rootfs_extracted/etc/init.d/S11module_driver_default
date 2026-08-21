@@ -3,6 +3,9 @@
 
 case "$1" in
   start)
+        if [ -f /usr/prog/module/driver.sh ]; then
+            sh /usr/prog/module/driver.sh
+        fi
 	cd /module_driver/
 	./driver_default_init_script.sh
 	cd -
