@@ -50,11 +50,16 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
+rm /usr/prog/qt-4.8.6 -rf
+rm /usr/prog/nim -rf
+rm /usr/prog/opencv-4.10 -rf
+rm /usr/prog/wifi/8821cu.ko*
+
 if [ -f $WORK_DIR/zip/img.zip  ]; then
         #rm /usr/data/firmwareRes/img -rf
 	#sync
 	unzip -o $WORK_DIR/zip/img.zip -d /usr/data/firmwareRes/
-	sleep 3
+	sleep 1
 	sync
 fi
 
@@ -62,9 +67,18 @@ if [ -f $WORK_DIR/zip/font.zip  ]; then
         #rm /usr/data/firmwareRes/font -rf
 	#sync
 	unzip -o $WORK_DIR/zip/font.zip -d /usr/data/firmwareRes/
-	sleep 3
 	sync
+	unzip -o -j $WORK_DIR/zip/font1.zip -d  /usr/data/firmwareRes/font/
+	sync
+	unzip -o -j $WORK_DIR/zip/font2.zip -d  /usr/data/firmwareRes/font/
+	sync
+	unzip -o -j $WORK_DIR/zip/font3.zip -d  /usr/data/firmwareRes/font/
+	sync
+	chmod 777 /usr/data/firmwareRes/font/*
+	sync
+	sleep 1
 fi
+
 
 # copy reset factory model
 if [ -f "$GCODE_DIR/Doberman‌_PLA_3h26m.gcode" ]; then
@@ -90,14 +104,15 @@ if [ -f $GCODE_DIR/Logo_PLA_10m43s.gcode ] || [ -f $GCODE_DIR/Logo_PLA_17m6s.gco
 	sync
 fi
 
-if [ ! -d "/usr/prog/ffmpeg-402" ]; then
-    echo "unzip ffmpeg-4.0.2..."
-    unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
-    sync
-fi
-
+echo "unzip ffmpeg-4.0.2..."
+unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
 sync
-sleep 3
+    
+#if [ ! -d "/usr/prog/ffmpeg-402" ]; then
+#    echo "unzip ffmpeg-4.0.2..."
+#    unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
+#    sync
+#fi
 
 cd /usr/prog/PROGRAM/library/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
@@ -109,6 +124,6 @@ if [ ${DIR_COUNT} -gt 2 ];then
 fi
 
 sync
-sleep 5
+sleep 3
 
 exit 0
