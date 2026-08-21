@@ -23,6 +23,10 @@ fi
 
 cat $WORK_DIR/mcu.img > /dev/fb0
 
+rm /usr/prog/qt-4.8.6 -rf
+rm /usr/prog/nim -rf
+rm /usr/prog/opencv-4.10 -rf
+rm /usr/prog/wifi/8821cu.ko*
 
 if [ -f $WORK_DIR/IAPCommand ];then
         chmod a+x $WORK_DIR/IAPCommand
@@ -152,7 +156,7 @@ if [ ${DIR_COUNT} -gt 2 ];then
         rm -r /usr/prog/PROGRAM/control/$CONTROL_VERSION
 fi
 		
-sleep 5
+sleep 3
 
 exit 0
 
