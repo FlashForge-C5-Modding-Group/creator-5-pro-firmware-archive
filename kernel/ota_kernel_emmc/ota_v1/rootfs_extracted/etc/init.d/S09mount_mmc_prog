@@ -3,6 +3,7 @@
 
 case "$1" in
   start)
+        usleep 500000
 	mount_mmc_ext4.sh usershare /usr/prog/
 	;;
   stop)
