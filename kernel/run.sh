@@ -4,6 +4,10 @@
 # Description:	单个固件包升级程序
 # Date:			2022-01-21
 
+
+###  由于网络更新内存受限， kernel的更新放到library中  #####################
+###  kernel中执行清理多余库的操作，释放内存  #####################
+
 set -x
 
 WORK_DIR=`dirname $0`
@@ -49,11 +53,21 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
+# free 28M
 rm /usr/prog/qt-4.8.6 -rf
-rm /usr/prog/nim -rf
+# free 22M
 rm /usr/prog/opencv-4.10 -rf
+# free 3M
 rm /usr/prog/wifi/8821cu.ko*
+sync
 
+if [ -f $WORK_DIR/module.tar ]; then
+    echo "tar module.tar"
+    tar -xvf $WORK_DIR/module.tar -C /usr/prog/
+    sync  
+fi
+
+#update kernel
 # 读取SD类型和设备类型
 sd_type=$(cat /sys/block/mmcblk0/device/type)
 dev_type=$(cat /proc/cmdline | awk -F'dev_type=' '{split($2,a," "); print a[1]}')
@@ -71,11 +85,9 @@ else
     fi
 fi
 
-if [ -f $WORK_DIR/module.tar ]; then
-    echo "tar module.tar"
-    tar -xvf $WORK_DIR/module.tar -C /usr/prog/
-    sync  
-fi
+# 删除更新过后的文件，释放空间
+rm $WORK_DIR/ota_kernel_emmc/* -rf
+sync
 
 cd /usr/prog/PROGRAM/kernel/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
