@@ -188,11 +188,11 @@ class LookAheadQueue:
 
 BUFFER_TIME_LOW = 1.0
 BUFFER_TIME_HIGH = 2.0
-BUFFER_TIME_START = 0.250
-BGFLUSH_LOW_TIME = 0.200
-BGFLUSH_BATCH_TIME = 0.200
+BUFFER_TIME_START = 0.500
+BGFLUSH_LOW_TIME = 0.500
+BGFLUSH_BATCH_TIME = 0.250
 BGFLUSH_EXTRA_TIME = 0.250
-MIN_KIN_TIME = 0.100
+MIN_KIN_TIME = 0.200
 MOVE_BATCH_TIME = 0.500
 STEPCOMPRESS_FLUSH_TIME = 0.050
 SDS_CHECK_TIME = 0.001 # step+dir+step filter in stepcompress.c
@@ -220,6 +220,21 @@ class ToolHead:
         # Velocity and acceleration control
         self.max_velocity = config.getfloat('max_velocity', above=0.)
         self.max_accel = config.getfloat('max_accel', above=0.)
+        self.short_move_limit = config.getboolean('short_move_limit', True)
+        self.short_move_distance = config.getfloat(
+            'short_move_distance', 0.75, above=0.)
+        self.short_move_min_time = config.getfloat(
+            'short_move_min_time', 0.0025, above=0.)
+        self.short_move_max_accel = config.getfloat(
+            'short_move_max_accel', 5000., above=0.)
+        self.short_extrude_move_limit = config.getboolean(
+            'short_extrude_move_limit', True)
+        self.short_extrude_move_distance = config.getfloat(
+            'short_extrude_move_distance', 0.75, above=0.)
+        self.short_extrude_move_max_velocity = config.getfloat(
+            'short_extrude_move_max_velocity', 80., above=0.)
+        self.short_extrude_move_max_accel = config.getfloat(
+            'short_extrude_move_max_accel', 1500., above=0.)
         min_cruise_ratio = 0.5
         if config.getfloat('minimum_cruise_ratio', None) is None:
             req_accel_to_decel = config.getfloat('max_accel_to_decel', None,
@@ -329,9 +344,11 @@ class ToolHead:
             self._advance_flush_time(flush_time)
             if flush_time >= want_flush_time:
                 break
+    def _get_estimated_print_time(self, eventtime):
+        return max([m.estimated_print_time(eventtime) for m in self.all_mcus])
     def _calc_print_time(self):
         curtime = self.reactor.monotonic()
-        est_print_time = self.mcu.estimated_print_time(curtime)
+        est_print_time = self._get_estimated_print_time(curtime)
         kin_time = max(est_print_time + MIN_KIN_TIME, self.min_restart_time)
         kin_time += self.kin_flush_delay
         min_print_time = max(est_print_time + BUFFER_TIME_START, kin_time)
@@ -389,7 +406,7 @@ class ToolHead:
         return self.print_time
     def _check_pause(self):
         eventtime = self.reactor.monotonic()
-        est_print_time = self.mcu.estimated_print_time(eventtime)
+        est_print_time = self._get_estimated_print_time(eventtime)
         buffer_time = self.print_time - est_print_time
         if self.special_queuing_state:
             if self.check_stall_time:
@@ -414,7 +431,7 @@ class ToolHead:
                 self.need_check_pause = self.reactor.NEVER
                 return
             eventtime = self.reactor.pause(eventtime + min(1., pause_time))
-            est_print_time = self.mcu.estimated_print_time(eventtime)
+            est_print_time = self._get_estimated_print_time(eventtime)
             buffer_time = self.print_time - est_print_time
         if not self.special_queuing_state:
             # In main state - defer pause checking until needed
@@ -432,7 +449,7 @@ class ToolHead:
         return self.reactor.NEVER
     def _flush_handler(self, eventtime):
         try:
-            est_print_time = self.mcu.estimated_print_time(eventtime)
+            est_print_time = self._get_estimated_print_time(eventtime)
             if not self.special_queuing_state:
                 # In "main" state - flush lookahead if buffer runs low
                 print_time = self.print_time
@@ -475,6 +492,17 @@ class ToolHead:
         if not move.move_d:
             return
         if move.is_kinematic_move:
+            if (self.short_move_limit
+                and 0. < move.move_d <= self.short_move_distance
+                and move.min_move_t < self.short_move_min_time):
+                move.limit_speed(move.move_d / self.short_move_min_time,
+                                 self.short_move_max_accel)
+            xy_dist = math.hypot(move.axes_d[0], move.axes_d[1])
+            if (self.short_extrude_move_limit and move.axes_d[3] > 0.
+                and 0. < xy_dist <= self.short_extrude_move_distance):
+                move.limit_speed(self.short_extrude_move_max_velocity,
+                                 self.short_extrude_move_max_accel)
+        if move.is_kinematic_move:
             self.kin.check_move(move)
         if move.axes_d[3]:
             self.extruder.check_move(move)
@@ -497,7 +525,7 @@ class ToolHead:
         self._flush_lookahead()
         eventtime = self.reactor.monotonic()
         while (not self.special_queuing_state
-               or self.print_time >= self.mcu.estimated_print_time(eventtime)):
+               or self.print_time >= self._get_estimated_print_time(eventtime)):
             if not self.can_pause:
                 break
             eventtime = self.reactor.pause(eventtime + 0.100)
@@ -513,7 +541,7 @@ class ToolHead:
             if self.drip_completion.test():
                 raise DripModeEndSignal()
             curtime = self.reactor.monotonic()
-            est_print_time = self.mcu.estimated_print_time(curtime)
+            est_print_time = self._get_estimated_print_time(curtime)
             wait_time = self.print_time - est_print_time - flush_delay
             if wait_time > 0. and self.can_pause:
                 # Pause before sending more steps
@@ -555,7 +583,7 @@ class ToolHead:
         max_queue_time = max(self.print_time, self.last_flush_time)
         for m in self.all_mcus:
             m.check_active(max_queue_time, eventtime)
-        est_print_time = self.mcu.estimated_print_time(eventtime)
+        est_print_time = self._get_estimated_print_time(eventtime)
         self.clear_history_time = est_print_time - MOVE_HISTORY_EXPIRE
         buffer_time = self.print_time - est_print_time
         is_active = buffer_time > -60. or not self.special_queuing_state
@@ -564,12 +592,12 @@ class ToolHead:
         return is_active, "print_time=%.3f buffer_time=%.3f print_stall=%d" % (
             self.print_time, max(buffer_time, 0.), self.print_stall)
     def check_busy(self, eventtime):
-        est_print_time = self.mcu.estimated_print_time(eventtime)
+        est_print_time = self._get_estimated_print_time(eventtime)
         lookahead_empty = not self.lookahead.queue
         return self.print_time, est_print_time, lookahead_empty
     def get_status(self, eventtime):
         print_time = self.print_time
-        estimated_print_time = self.mcu.estimated_print_time(eventtime)
+        estimated_print_time = self._get_estimated_print_time(eventtime)
         res = dict(self.kin.get_status(eventtime))
         res.update({ 'print_time': print_time,
                      'stalls': self.print_stall,
@@ -640,29 +668,39 @@ class ToolHead:
             elif req_accel_to_decel is not None and max_accel is None:
                 min_cruise_ratio = 1. - min(1., (req_accel_to_decel
                                                  / self.max_accel))
-        if max_velocity is not None:
-            self.max_velocity = max_velocity
-        if max_accel is not None: 
-            self.max_accel = max_accel
-            self.user_max_accel = max_accel
-        if square_corner_velocity is not None:
-            self.square_corner_velocity = square_corner_velocity
-        if min_cruise_ratio is not None:
-            self.min_cruise_ratio = min_cruise_ratio
-        # mute mode
-        if self.mute_mode:
-            self.max_accel = min(self.max_accel, MUTE_ACCEL)
-        self._calc_junction_deviation()
-        #msg = ("max_velocity: %.6f\n"
-        #       "max_accel: %.6f\n"
-        #       "minimum_cruise_ratio: %.6f\n"
-        #       "square_corner_velocity: %.6f" % (
-        #           self.max_velocity, self.max_accel,
-        #           self.min_cruise_ratio, self.square_corner_velocity))
-        #self.printer.set_rollover_info("toolhead", "toolhead: %s" % (msg,))
         if (max_velocity is None and max_accel is None
             and square_corner_velocity is None and min_cruise_ratio is None):
+            msg = ("max_velocity: %.6f\n"
+                   "max_accel: %.6f\n"
+                   "minimum_cruise_ratio: %.6f\n"
+                   "square_corner_velocity: %.6f" % (
+                       self.max_velocity, self.max_accel,
+                       self.min_cruise_ratio, self.square_corner_velocity))
             gcmd.respond_info(msg, log=False)
+            return
+        new_max_velocity = (self.max_velocity if max_velocity is None
+                            else max_velocity)
+        new_max_accel = self.max_accel if max_accel is None else max_accel
+        if max_accel is not None: 
+            self.user_max_accel = max_accel
+        new_square_corner_velocity = (
+            self.square_corner_velocity if square_corner_velocity is None
+            else square_corner_velocity)
+        new_min_cruise_ratio = (self.min_cruise_ratio
+                                if min_cruise_ratio is None
+                                else min_cruise_ratio)
+        if (new_max_velocity == self.max_velocity
+            and new_max_accel == self.max_accel
+            and new_square_corner_velocity == self.square_corner_velocity
+            and new_min_cruise_ratio == self.min_cruise_ratio):
+            return
+        self.max_velocity = new_max_velocity
+        self.max_accel = new_max_accel
+        if self.mute_mode:
+            self.max_accel = min(self.max_accel, MUTE_ACCEL)
+        self.square_corner_velocity = new_square_corner_velocity
+        self.min_cruise_ratio = new_min_cruise_ratio
+        self._calc_junction_deviation()
     def cmd_M204(self, gcmd):
         # Use S for accel
         accel = gcmd.get_float('S', None, above=0.)

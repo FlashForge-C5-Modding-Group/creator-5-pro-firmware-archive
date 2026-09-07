@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import os, logging, threading
+from . import output_pin
 
 
 ######################################################################
@@ -147,6 +148,9 @@ class Heater:
     cmd_SET_HEATER_TEMPERATURE_help = "Sets a heater temperature"
     def cmd_SET_HEATER_TEMPERATURE(self, gcmd):
         temp = gcmd.get_float('TARGET', 0.)
+        # Ensure the 24V power rail (DC24V_CTL) is switched on so that the
+        # heater actually receives power, regardless of the configured 'value'.
+        output_pin.force_output_pin_on(self.printer, 'DC24V_CTL')
         pheaters = self.printer.lookup_object('heaters')
         pheaters.set_temperature(self, temp)
 
@@ -262,6 +266,12 @@ class PrinterHeaters:
         gcode.register_command("M105", self.cmd_M105, when_not_ready=True)
         gcode.register_command("TEMPERATURE_WAIT", self.cmd_TEMPERATURE_WAIT,
                                desc=self.cmd_TEMPERATURE_WAIT_help)
+    def _upsert_pending_heater(self, heater_name, temp):
+        for i in range(len(self.pending_extruders)):
+            if self.pending_extruders[i][0] == heater_name:
+                self.pending_extruders[i] = (heater_name, temp)
+                return
+        self.pending_extruders.append((heater_name, temp))
     def load_config(self, config):
         self.have_load_sensors = True
         # Load default temperature sensors
@@ -319,6 +329,8 @@ class PrinterHeaters:
                 'available_sensors': self.available_sensors,
                 'available_monitors': self.available_monitors}
     def turn_off_all_heaters(self, print_time=0.):
+        self.active_heating_extruders = []
+        self.pending_extruders = []
         for heater in self.heaters.values():
             heater.set_temp(0.)
     cmd_TURN_OFF_HEATERS_help = "Turn off all heaters"
@@ -409,27 +421,37 @@ class PrinterHeaters:
                             self.active_heating_extruders[0])
                 # Add to pending queue
                 if wait:
-                    # If waiting, block until heater is active
-                    self.pending_extruders.append((heater_name, temp))
-                    while (heater_name, temp) in self.pending_extruders:
+                    # If waiting, block until the heater is actually active.
+                    # The queue is deduped by heater name, so waiting on the
+                    # exact (heater, temp) tuple would be brittle after target
+                    # updates.
+                    self._upsert_pending_heater(heater_name, temp)
+                    while heater_name not in self.active_heating_extruders:
                         self.reactor.pause(self.reactor.monotonic() + 0.2)
 
                     while heater_name in self.active_heating_extruders:
                         self._wait_for_temperature(self.heaters[heater_name])
                         self.reactor.pause(self.reactor.monotonic() + 0.2)
                 else:
-                    # Non-blocking - just add to queue
-                    self.pending_extruders.append((heater_name, temp))
+                    # Non-blocking - update the existing entry for this heater
+                    # instead of appending a duplicate, so stale entries do
+                    # not accumulate across tool changes / consecutive prints.
+                    self._upsert_pending_heater(heater_name, temp)
         else:
             # Cooling down
             if heater_name in self.active_heating_extruders:
                 logging.info("cancel active heater %s", heater_name)
                 self.active_heating_extruders.remove(heater_name)
-            for i in range(len(self.pending_extruders)):
-                if self.pending_extruders[i][0] == heater_name:
-                    logging.info("cancel pending heater %s", heater_name)
-                    del self.pending_extruders[i]
-                    break
+            # fp: remove ALL pending entries for this heater, not just the
+            # first one. Duplicate pending entries accumulate across tool
+            # changes (non-blocking set_temperature appends without dedup),
+            # and leftover entries after print A would make print B pop a
+            # stale entry and set the wrong (or zero) target -> no heating.
+            new_pending = [p for p in self.pending_extruders
+                           if p[0] != heater_name]
+            if len(new_pending) != len(self.pending_extruders):
+                logging.info("cancel pending heater %s", heater_name)
+            self.pending_extruders = new_pending
             heater.set_temp(temp)
 
     cmd_TEMPERATURE_WAIT_help = "Wait for a temperature on a sensor"

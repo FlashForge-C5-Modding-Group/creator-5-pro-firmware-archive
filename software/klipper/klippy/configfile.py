@@ -281,6 +281,10 @@ class PrinterConfig:
         return self._build_config_wrapper(self._read_config_file(filename),
                                           filename)
     def read_main_config(self):
+        # If a startup fix was applied, use the corrected config directly
+        fixed = getattr(self, '_startup_fixed_config', None)
+        if fixed is not None:
+            return fixed
         filename = self.printer.get_start_args()['config_file']
         data = self._read_config_file(filename)
         regular_data, autosave_data = self._find_autosave_data(data)
@@ -289,6 +293,101 @@ class PrinterConfig:
         self.autosave = self._build_config_wrapper(autosave_data, filename)
         cfg = self._build_config_wrapper(regular_data + autosave_data, filename)
         return cfg
+    # Startup check & fix for specific config sections. FlashForge Creator5
+    # custom logic: ensure [output_pin DC24V_CTL] always has value=0 and
+    # shutdown_value=0 on boot. If already correct, leave the file untouched.
+    def check_fix_startup_config(self):
+        filename = self.printer.get_start_args()['config_file']
+        section = 'output_pin DC24V_CTL'
+        expected = {'pin': 'eheaterboard:PA3',
+                    'value': '0',
+                    'shutdown_value': '0'}
+        try:
+            data = self._read_config_file(filename)
+        except error:
+            logging.exception("Unable to read config on startup check")
+            return
+        # Skip if the section already matches exactly (do not rewrite the
+        # file, so mtime/content stays untouched)
+        try:
+            config = self._build_config_wrapper(data, filename)
+        except error:
+            logging.exception("Unable to parse config on startup check")
+            return
+        fileconfig = config.fileconfig
+        if fileconfig.has_section(section):
+            ok = True
+            for opt, val in expected.items():
+                if not fileconfig.has_option(section, opt) \
+                        or fileconfig.get(section, opt).strip() != val:
+                    ok = False
+                    break
+            if ok:
+                logging.info("Startup config check: [%s] already correct,"
+                             " no changes needed" % (section,))
+                return
+        logging.info("Startup config check: fixing [%s]" % (section,))
+        # Rebuild the section (text level) so formatting and all other
+        # sections/options in the file are preserved verbatim.
+        lines = data.split('\n')
+        new_lines = []
+        i = 0
+        n = len(lines)
+        found = False
+        while i < n:
+            line = lines[i]
+            stripped = line.strip()
+            if stripped.startswith('[') and stripped.endswith(']') \
+                    and stripped[1:-1].strip() == section:
+                # Replace this section block entirely
+                found = True
+                new_lines.append('[%s]' % (section,))
+                for opt, val in expected.items():
+                    new_lines.append('%s: %s' % (opt, val))
+                # Add a blank line after the section
+                new_lines.append('')
+                # Skip existing lines until the next section header
+                i += 1
+                while i < n:
+                    s = lines[i].strip()
+                    if s.startswith('[') and s.endswith(']'):
+                        break
+                    i += 1
+                continue
+            new_lines.append(line)
+            i += 1
+        if not found:
+            # Section does not exist yet - append it at the end
+            new_lines.append('')
+            new_lines.append('[%s]' % (section,))
+            for opt, val in expected.items():
+                new_lines.append('%s: %s' % (opt, val))
+            # Add a trailing blank line
+            new_lines.append('')
+        new_data = '\n'.join(new_lines)
+        # Atomic write: temp file then rename
+        temp_name = filename + "_startup_fix"
+        try:
+            f = open(temp_name, 'w')
+            f.write(new_data)
+            f.close()
+            os.rename(temp_name, filename)
+        except:
+            logging.exception("Unable to write config during startup check")
+            try:
+                os.remove(temp_name)
+            except OSError:
+                pass
+            return
+        logging.info("Startup config check: [%s] written, will re-read" %
+                     (section,))
+        # Re-read the config so the fixed values take effect immediately
+        try:
+            self._startup_fixed_config = self._build_config_wrapper(
+                new_data, filename)
+        except error:
+            logging.exception("Unable to re-read config after startup fix")
+
     def check_unused_options(self, config):
         fileconfig = config.fileconfig
         objects = dict(self.printer.lookup_objects())

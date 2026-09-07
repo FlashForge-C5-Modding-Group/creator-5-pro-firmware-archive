@@ -313,7 +313,11 @@ class Homing:
                                for rp, ad in zip(retractpos, axes_d)]
             # 容差与重试参数（优先从 homing_info 读取，否则使用默认值）
             samples_tolerance = getattr(hi, 'samples_tolerance', 0.010)
-            samples_tolerance = 25
+            # fp: raise tolerance from 25 to 200 steps - normal eddy sensor
+            # noise is 30~40 steps (see logs); 25 caused endless retries.
+            # Real pre-trigger outliers (thermal drift) are 1000+ steps and
+            # are still caught by the majority vote below.
+            samples_tolerance = 200
             samples_retries   = getattr(hi, 'samples_retries',   10)
             # 三次慢速回零，收集各次 trigger_mcu_pos，按容差判断一致性
             SAMPLE_COUNT = 3
@@ -370,31 +374,67 @@ class Homing:
                 all_trig_pos.append(trig_pos_this)
                 logging.info("home_rails: sample %d trig_pos=%s",
                              len(all_trig_pos), trig_pos_this)
-                # 容差检查：对每个步进轴，判断所有样本的 trig_pos 极差
-                if len(all_trig_pos) > 1:
+                # 容差检查（多数投票）：采满全部样本后，对每个步进轴找出
+                # 互相在容差内的最大样本组。只要存在至少 2 个一致样本，就
+                # 视为有效（单个提前触发的离群样本被剔除，例如涡流传感器
+                # 热漂移导致喷头远离平台时就触发）。全部样本互相不一致才
+                # 报错重试。若最后一个样本恰好是离群值（最终位置取自最后
+                # 一次 hmove），丢弃它并补采一个。
+                if len(all_trig_pos) >= SAMPLE_COUNT:
                     stepper_names = list(all_trig_pos[0].keys())
-                    spread_ok = True
+                    inconsistent = False
+                    last_outlier = False
                     for sname in stepper_names:
                         vals = [s[sname] for s in all_trig_pos]
-                        spread = max(vals) - min(vals)
-                        if spread > samples_tolerance:
-                            spread_ok = False
+                        best_group = []
+                        for i in range(len(vals)):
+                            group = [vals[i]]
+                            for j in range(len(vals)):
+                                if j != i and abs(vals[j] - vals[i]) \
+                                        <= samples_tolerance:
+                                    group.append(vals[j])
+                            if len(group) > len(best_group):
+                                best_group = group
+                        if len(best_group) < 2:
+                            inconsistent = True
                             break
-                    if not spread_ok:
+                        if vals[-1] not in best_group:
+                            last_outlier = True
+                    if inconsistent:
                         if retries >= samples_retries:
                             raise self.printer.command_error(
                                 "Probe triggered prior samples exceed tolerance on stepper '%s'"
-                                " (spread=%d steps > %.4fmm tolerance). "
+                                " (no %d samples within %d steps tolerance). "
                                 "Check endstop and mechanics."
-                                % (sname, spread, samples_tolerance))
+                                % (sname, 2, samples_tolerance))
                         wait_s = min(1.0, HOMING_RETRY_DELAY * (retries + 1))
                         logging.warning(
-                            "home_rails: samples spread %d steps on '%s', "
+                            "home_rails: samples inconsistent on '%s', "
                             "waiting %.2fs and retrying (%d/%d)...",
-                            spread, sname, wait_s, retries + 1, samples_retries)
+                            sname, wait_s, retries + 1, samples_retries)
                         reactor.pause(reactor.monotonic() + wait_s)
                         retries += 1
                         all_trig_pos = []
+                    elif last_outlier:
+                        # 多数组有效但最后一个样本是离群值（提前触发），
+                        # 丢弃它并补采，确保最终位置来自有效样本。
+                        # 同样消耗 retries 以防传感器持续离群导致死循环。
+                        if retries >= samples_retries:
+                            raise self.printer.command_error(
+                                "Probe triggered prior samples on stepper '%s'"
+                                " keep being outliers (pre-triggered) after"
+                                " %d retries. Check endstop and mechanics."
+                                % (sname, samples_retries))
+                        wait_s = min(1.0, HOMING_RETRY_DELAY * (retries + 1))
+                        logging.warning(
+                            "home_rails: last sample on '%s' is an outlier"
+                            " (pre-triggered), dropping and resampling"
+                            " (%d/%d)...",
+                            sname, retries + 1, samples_retries)
+                        reactor.pause(reactor.monotonic() + wait_s)
+                        retries += 1
+                        all_trig_pos.pop()
+                        continue
             # 三次一致，取最后一次 hmove 作为最终结果（最新触发位置最准确）
             # trigger_mcu_pos 在下方统一赋值
         # Signal home operation complete

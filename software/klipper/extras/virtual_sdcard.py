@@ -3,23 +3,33 @@
 # Copyright (C) 2018-2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import os, sys, logging, io, re
+import os, logging, io, re
+import chelper
 
 VALID_GCODE_EXTS = {'gcode', 'g', 'gco', 'gx'}
-VALID_GCODE_T = frozenset(['T0', 'T1', 'T2', 'T3', 'T4', 'T5'])
+VALID_GCODE_T = frozenset([b'T0', b'T1', b'T2', b'T3'])
 VALID_M104_T = frozenset(['M104', 'M109'])
 EXTRUDER_COUNT = 4
 
-_REGEX_T_VALUE = re.compile(r'T(\d+)')
-_REGEX_S_VALUE = re.compile(r'S(\d+)')
-_REGEX_SET_VELOCITY = re.compile(r'SET_VELOCITY_LIMIT')
-_REGEX_SET_PA = re.compile(r'SET_PRESSURE_ADVANCE')
+_REGEX_T_VALUE = re.compile(rb'T(\d+)')
+_REGEX_S_VALUE = re.compile(rb'S(\d+)')
+_REGEX_SET_VELOCITY = re.compile(rb'SET_VELOCITY_LIMIT')
+_REGEX_SET_PA = re.compile(rb'SET_PRESSURE_ADVANCE')
 
 DEFAULT_ERROR_GCODE = """
 {% if 'heaters' in printer %}
    TURN_OFF_HEATERS
 {% endif %}
 """
+
+SD_WORK_BATCH_TIME = 0.005
+SD_WORK_BATCH_PAUSE = 0.001
+
+# fp add for preheat (nozzle pre-heating)
+FIND_ONE = 1
+FIND_OK = 2
+FIND_NO = 3
+FIND_PRINT_END = 4
 
 class VirtualSD:
     def __init__(self, config):
@@ -58,8 +68,8 @@ class VirtualSD:
         self.pa_value_t1 = 99.0
         self.pa_value_t2 = 99.0
         self.pa_value_t3 = 99.0
-        self.m104 = "M104"
-        self.m109 = "M109"
+        self.m104 = b"M104"
+        self.m109 = b"M109"
         self.set_velocity_limit = ""
         self.channel_pause_z = "0.0";
         self.channel_pause_x = "0.0";
@@ -74,12 +84,27 @@ class VirtualSD:
         self.no_filament_check_ex = False
         self.gcode_ex_used = ['T99', 'T99', 'T99', 'T99', 'T99', 'T99']
         self.gcode_ex_used_changed = ['T99', 'T99', 'T99', 'T99', 'T99', 'T99']
+        # fp add for preheat (nozzle pre-heating)
+        self.find_flag = FIND_PRINT_END
+        self.find_next_fname = None
+        self.partial_input = b""
+        self.find_seek = 0
+        self.heater_head = []
+        self.active_head = None
+        self.has_preheat = False
+        self.pretemp = 160
+        # fp add: preheat only if more than 2 nozzles are actually used
+        self.preheat_enable = False
         # Error handling
         gcode_macro = self.printer.load_object(config, 'gcode_macro')
         self.on_error_gcode = gcode_macro.load_template(
             config, 'on_error_gcode', DEFAULT_ERROR_GCODE)
         # Register commands
         self.gcode = self.printer.lookup_object('gcode')
+        # Fast path for simple G0/G1 moves
+        self.gcode_move = None
+        self.chelper_ffi, self.chelper_lib = chelper.get_ffi()
+        self._g1_params = None
         for cmd in ['M20', 'M21', 'M23', 'M24', 'M25', 'M26', 'M27']:
             self.gcode.register_command(cmd, getattr(self, 'cmd_' + cmd))
         for cmd in ['M28', 'M29', 'M30']:
@@ -349,11 +374,12 @@ class VirtualSD:
         flist = [f[0] for f in files]
         files_by_lower = { fname.lower(): fname for fname, fsize in files }
         fname = filename
+        self.find_next_fname = fname  # fp add for preheat
         try:
             #if fname not in flist:
                 #fname = files_by_lower[fname.lower()]
             fname = os.path.join(self.sdcard_dirname, fname)
-            f = io.open(fname, 'r', newline='')
+            f = io.open(fname, 'rb')
             f.seek(0, os.SEEK_END)
             fsize = f.tell()
             f.seek(0)
@@ -405,6 +431,198 @@ class VirtualSD:
         else:
             return '0'
         return match.group(1) if match else '0'
+
+    # fp add for preheat (nozzle pre-heating) - start
+    def _remap_head(self, head):
+        # Map an original T<n> head to its remapped target using the
+        # SDCARD_SET_GCODE_EX_USED_BASE/CHANGED tables. Returns bytes
+        # like b'T2'. If no remap entry exists, fall back to T<n> % 4.
+        if not isinstance(head, bytes):
+            head = head.encode()
+        try:
+            idx = int(head[1:].decode())
+        except (ValueError, IndexError):
+            return head
+        # Always honour the remap tables for preheat, independent of the
+        # need_check_ex / no_filament_check_ex switches. The tables default to
+        # 'T99' so an unset entry simply falls through to the %4 fallback.
+        str_base = "T%d" % idx
+        try:
+            i_base = self.gcode_ex_used.index(str_base)
+        except ValueError:
+            i_base = -1
+        if i_base >= 0 and self.gcode_ex_used_changed[i_base] != 'T99':
+            return self.gcode_ex_used_changed[i_base].encode()
+        return (b'T%d' % (idx % EXTRUDER_COUNT))
+
+    def find_next_active_channel(self, file_pos, lines, partial_input, head):
+        # First find lines already buffered
+        self.find_flag = FIND_NO
+        self.partial_input = b""
+        self.find_seek = 0
+
+        remain_lines = list(lines)
+        self.heater_head = []
+        # The current head is already active (being heated by the normal M104
+        # flow); it must NOT be preheated again. Track it separately so it is
+        # also excluded from the cool-down pass.
+        self.active_head = self._remap_head(head)
+        self.partial_input = partial_input
+        self.find_seek = file_pos
+        while remain_lines:
+            line = remain_lines.pop()
+            # Get preheat temp
+            if not self.has_preheat:
+                if b"set nozzle temperature" in line and b"cooldown" in line:
+                    logging.info("set nozzle_1 '%s' ", line)
+                    match = re.search(rb'S(\d+)', line)
+                    if match:
+                        self.pretemp = int(match.group(1))
+                        self.has_preheat = True
+            if line in VALID_GCODE_T:
+                remapped = self._remap_head(line)
+                # Collect the (remapped) head used in the model
+                if remapped not in self.heater_head:
+                    self.heater_head.append(remapped)
+
+                if self.find_flag == FIND_ONE:
+                    self.find_flag = FIND_OK
+                    self._finish_preheat()
+                    return
+                else:
+                    self.find_flag = FIND_ONE
+
+        try:
+            fname = os.path.join(self.sdcard_dirname, self.find_next_fname)
+            f = io.open(fname, 'rb')
+            f.seek(0, os.SEEK_END)
+            fsize = f.tell()
+            f.seek(0)
+        except:
+            logging.exception("virtual_sdcard file open")
+            raise
+        f.seek(self.find_seek)
+        # Read file 8192*N
+        for i in range(10):
+            try:
+                data = f.read(8192)
+                self.find_seek = self.find_seek + 8192
+            except:
+                logging.exception("find_next_active_channel read")
+                break
+            if not data:
+                self.find_flag = FIND_PRINT_END
+                f.close()
+                f = None
+                return
+            remain_lines = data.split(b'\n')
+            remain_lines[0] = self.partial_input + remain_lines[0]
+            self.partial_input = remain_lines.pop()
+            remain_lines.reverse()
+
+            while remain_lines:
+                line = remain_lines.pop()
+                # Get preheat temp
+                if not self.has_preheat:
+                    if b"set nozzle temperature" in line and b"cooldown" in line:
+                        logging.info("set nozzle_2 '%s' ", line)
+                        match = re.search(rb'S(\d+)', line)
+                        if match:
+                            self.pretemp = int(match.group(1))
+                            self.has_preheat = True
+                if line in VALID_GCODE_T:
+                    remapped = self._remap_head(line)
+                    if remapped not in self.heater_head:
+                        self.heater_head.append(remapped)
+                    if self.find_flag == FIND_ONE:
+                        self.find_flag = FIND_OK
+                        self._finish_preheat()
+                        f.close()
+                        f = None
+                        return
+                    else:
+                        self.find_flag = FIND_ONE
+
+        # Other head cooling
+        self._finish_preheat()
+        f.close()
+        f = None
+
+    def _finish_preheat(self):
+        # Decide whether preheat should be enabled: only when more than
+        # 2 distinct nozzles are actually used in the model.
+        self.preheat_enable = len(self.heater_head) > 2
+        if self.preheat_enable:
+            # Preheat the (remapped) heads actually used in the model, in
+            # natural T order (T0 -> T1 -> T2 -> T3) so the next-needed head
+            # is heated first rather than in file-scan order. Skip the current
+            # active head - it is already printing at its normal temperature
+            # and must not be overridden back to the preheat temperature.
+            for h in VALID_GCODE_T:
+                remapped = self._remap_head(h)
+                if remapped in self.heater_head \
+                        and remapped != self.active_head:
+                    self.gcode.run_script(
+                        f"M104 S{self.pretemp} {remapped.decode()}")
+        # Note: do NOT actively cool down any head here. The scan is
+        # incremental (only heads seen so far are in heater_head), so cooling
+        # heads "not yet seen" would drop a soon-to-be-used nozzle to 0 right
+        # before it is switched to, causing the target to jump to 0 and then
+        # re-heat after the tool change.
+
+    def find_next_block_data(self):
+        try:
+            fname = os.path.join(self.sdcard_dirname, self.find_next_fname)
+            f = io.open(fname, 'rb')
+            f.seek(0, os.SEEK_END)
+            fsize = f.tell()
+            f.seek(0)
+        except:
+            logging.exception("virtual_sdcard file open")
+            raise
+        f.seek(self.find_seek)
+        # Read file 8192*N
+        try:
+            data = f.read(8192)
+            self.find_seek = self.find_seek + 8192
+        except:
+            logging.exception("find_next_block_data read")
+        if not data:
+            self.find_flag = FIND_PRINT_END
+            f.close()
+            f = None
+            return
+        remain_lines = data.split(b'\n')
+        remain_lines[0] = self.partial_input + remain_lines[0]
+        self.partial_input = remain_lines.pop()
+        remain_lines.reverse()
+
+        while remain_lines:
+            line = remain_lines.pop()
+            # Get preheat temp
+            if not self.has_preheat:
+                if b"set nozzle temperature" in line and b"cooldown" in line:
+                    logging.info("set nozzle_3 '%s' ", line)
+                    match = re.search(rb'S(\d+)', line)
+                    if match:
+                        self.pretemp = int(match.group(1))
+                        self.has_preheat = True
+            if line in VALID_GCODE_T:
+                remapped = self._remap_head(line)
+                if remapped not in self.heater_head:
+                    self.heater_head.append(remapped)
+                if self.find_flag == FIND_ONE:
+                    self.find_flag = FIND_OK
+                    self._finish_preheat()
+                    f.close()
+                    f = None
+                    return
+                else:
+                    self.find_flag = FIND_ONE
+        f.close()
+        f = None
+    # fp add for preheat (nozzle pre-heating) - end
+
     # Background work timer
     def work_handler(self, eventtime):
         logging.info("Starting SD card print (position %d)", self.file_position)
@@ -417,15 +635,37 @@ class VirtualSD:
             return self.reactor.NEVER
         self.print_stats.note_start()
         gcode_mutex = self.gcode.get_mutex()
-        partial_input = ""
+        if self.gcode_move is None:
+            self.gcode_move = self.printer.lookup_object('gcode_move')
+            self._g1_params = self.chelper_ffi.new("struct gcode_g1_params *")
+        partial_input = b""
         lines = []
         exclude_line = ""
         exclude_flag = False
         error_message = None
+        busy_pause = 0.002
+        busy_pause_max = 0.020
+        batch_start = self.reactor.monotonic()
+        # fp add for preheat
+        seek_pos = self.file_position
+        self.find_flag = FIND_OK
+        self.has_preheat = False
+        # end
         while not self.must_pause_work:
             if not lines:
                 try:
+                    _rt = self.reactor.monotonic()
                     data = self.current_file.read(32768)
+                    # fp add for preheat
+                    seek_pos += 32768
+                    if self.find_flag != FIND_OK and self.find_flag != FIND_PRINT_END:
+                        self.find_next_block_data()
+                    # end
+                    _rd = self.reactor.monotonic() - _rt
+                    if _rd > 0.100:
+                        logging.warning(
+                            "virtual_sdcard: slow gcode read %.3fs"
+                            " at file_position %d", _rd, self.file_position)
                 except:
                     logging.exception("virtual_sdcard read")
                     break
@@ -435,29 +675,31 @@ class VirtualSD:
                     logging.info("Finished SD card print")
                     self.gcode.respond_raw("Done printing file")
                     break
-                raw_lines = data.split('\n')
+                raw_lines = data.split(b'\n')
                 raw_lines[0] = partial_input + raw_lines[0]
                 partial_input = raw_lines.pop()
                 lines.extend(reversed(raw_lines))
                 self.reactor.pause(self.reactor.NOW)
+                batch_start = self.reactor.monotonic()
                 continue
             # Pause if any other request is pending in the gcode class
             if gcode_mutex.test():
-                self.reactor.pause(self.reactor.monotonic() + 0.100)
+                self.reactor.pause(self.reactor.monotonic() + busy_pause)
+                busy_pause = min(busy_pause_max, busy_pause * 2.)
+                batch_start = self.reactor.monotonic()
                 continue
+            busy_pause = 0.002
             # Dispatch command
             self.cmd_from_sd = True
             line = lines.pop()
-            if sys.version_info.major >= 3:
-                next_file_position = self.file_position + len(line.encode()) + 1
-            else:
-                next_file_position = self.file_position + len(line) + 1
+            next_file_position = self.file_position + len(line) + 1
             self.next_file_position = next_file_position
-            
-            if not line.startswith(";"):
-                t_match = _REGEX_T_VALUE.search(line)
+
+            if not line.startswith(b";"):
+                t_match = (_REGEX_T_VALUE.search(line)
+                           if b'T' in line else None)
                 if t_match:
-                    ex_index = t_match.group(1)
+                    ex_index = t_match.group(1).decode()
                     if self.need_check_ex or self.no_filament_check_ex:
                         str_base = "T" + ex_index
                         try:
@@ -466,66 +708,70 @@ class VirtualSD:
                             i_base = -1
                         if i_base >= 0:
                             changed_ex = self.gcode_ex_used_changed[i_base]
-                            line = line.replace(str_base, changed_ex, 1)
+                            line = line.replace(
+                                str_base.encode(), changed_ex.encode(), 1)
                         else:
-                            line = line.replace(str_base, f'T{int(ex_index) % EXTRUDER_COUNT}', 1)
+                            line = line.replace(
+                                str_base.encode(),
+                                f'T{int(ex_index) % EXTRUDER_COUNT}'.encode(), 1)
                     else:
-                        line = line.replace(f'T{ex_index}', f'T{int(ex_index) % EXTRUDER_COUNT}', 1)
+                        line = line.replace(
+                            f'T{ex_index}'.encode(),
+                            f'T{int(ex_index) % EXTRUDER_COUNT}'.encode(), 1)
 
                 raw = line.lstrip()
-                if raw.startswith("S"):
+                c0 = raw[:1]
+                if c0 == b"S":
                     if _REGEX_SET_VELOCITY.search(line):
-                        self.set_velocity_limit = line.rstrip()
+                        self.set_velocity_limit = line.decode().rstrip()
                     elif _REGEX_SET_PA.search(line) and self.pa_enable == 1:
-                        pa_values = [self.pa_value_t0, self.pa_value_t1, 
+                        pa_values = [self.pa_value_t0, self.pa_value_t1,
                                      self.pa_value_t2, self.pa_value_t3]
                         pa_value = pa_values[self.load_channel] if self.load_channel < 4 else self.pa_value_t0
                         if pa_value > 10.0:
-                            self.gcode.run_script(line)
+                            self.gcode.run_script(line.decode())
                         else:
                             self.gcode.run_script(f"SET_PRESSURE_ADVANCE ADVANCE={pa_value}")
                         self.file_position = self.next_file_position
                         continue
 
-                if 'M106' in line:
-                    comment_pos = line.find(';')
+                if c0 == b"M" and b'M106' in line:
+                    comment_pos = line.find(b';')
                     if comment_pos != -1:
                         line = line[:comment_pos]
                     line = line.strip()
                     s_match = _REGEX_S_VALUE.search(line)
                     if s_match:
                         speed = int(s_match.group(1))
-                        if 'P2' in line and self.adjust_M106P2 == 1:
+                        if b'P2' in line and self.adjust_M106P2 == 1:
                             target_speed = speed + int(self.factor_M106P2 * 255 / 100)
                             self.gcode.run_script(f"M106 P2 S{target_speed}")
                             self.file_position = self.next_file_position
                             continue
-                        elif 'P' not in line and self.adjust_M106 == 1:
+                        elif b'P' not in line and self.adjust_M106 == 1:
                             target_speed = speed + int(self.factor_M106 * 255 / 100)
                             self.gcode.run_script(f"M106 S{target_speed}")
                             self.file_position = self.next_file_position
                             continue
-                            
-                #if self.speed_factor_enable == 1 and 'M220' in line:
-                #    line = (f"M220 S{self.speed_factor}")
-                    
-                if self.after_channel_g1 and ('G1' in line or 'G0' in line):
-                    comment_pos = line.find(';')
+
+                if self.after_channel_g1 and (b'G1' in line or b'G0' in line):
+                    comment_pos = line.find(b';')
                     if comment_pos != -1:
                         line = line[:comment_pos]
                     line = line.strip()
-                    
-                    self.channel_pause_is_z = 'Z' in line
-                    self.channel_pause_is_x = 'X' in line
-                    self.channel_pause_is_y = 'Y' in line
-                    
+                    line_text = line.decode()
+
+                    self.channel_pause_is_z = 'Z' in line_text
+                    self.channel_pause_is_x = 'X' in line_text
+                    self.channel_pause_is_y = 'Y' in line_text
+
                     if self.channel_pause_is_z:
-                        self.channel_pause_z = self.extract_coord(line, 'Z')
+                        self.channel_pause_z = self.extract_coord(line_text, 'Z')
                     if self.channel_pause_is_x:
-                        self.channel_pause_x = self.extract_coord(line, 'X')
+                        self.channel_pause_x = self.extract_coord(line_text, 'X')
                     if self.channel_pause_is_y:
-                        self.channel_pause_y = self.extract_coord(line, 'Y')
-                    
+                        self.channel_pause_y = self.extract_coord(line_text, 'Y')
+
                     if self.channel_pause_is_y and self.channel_pause_is_x:
                         self.gcode.run_script(f"G1 X{self.channel_pause_x} Y{self.channel_pause_y} F36000")
                         if self.channel_pause_is_z:
@@ -540,31 +786,36 @@ class VirtualSD:
                     self.file_position = self.next_file_position
                     continue
 
-                if (self.m104 in line or self.m109 in line) and 'T' not in line:
-                    comment_pos = line.find(';')
+                if (c0 == b"M"
+                    and (self.m104 in line or self.m109 in line)
+                    and b'T' not in line):
+                    comment_pos = line.find(b';')
                     if comment_pos != -1:
                         line = line[:comment_pos]
-                    line = line.strip() + " T" + str(self.print_channel)
+                    line = line.strip() + b" T" + str(self.print_channel).encode()
 
-                if line.startswith("EXCLUDE_OBJECT_START"):
-                    exclude_line = line
-                elif line.startswith("EXCLUDE_OBJECT_END"):
-                    exclude_line = line
+                if line.startswith(b"EXCLUDE_OBJECT_START"):
+                    exclude_line = line.decode()
+                elif line.startswith(b"EXCLUDE_OBJECT_END"):
+                    exclude_line = line.decode()
 
-                if "WIPE_TOWER_START" in line:
+                if b"WIPE_TOWER_START" in line:
                     if exclude_line and exclude_line.startswith("EXCLUDE_OBJECT_START"):
                         exclude_line = exclude_line.replace("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END")
                         self.gcode.run_script(exclude_line)
                         exclude_flag = True
 
-                if "WIPE_TOWER_END" in line and exclude_flag:
+                if b"WIPE_TOWER_END" in line and exclude_flag:
                     exclude_flag = False
                     if exclude_line:
                         exclude_line = exclude_line.replace("EXCLUDE_OBJECT_END", "EXCLUDE_OBJECT_START")
                         self.gcode.run_script(exclude_line)
 
-                if line.startswith("T") and line in VALID_GCODE_T:
-                    self.print_channel = int(line[1:])
+                if line.startswith(b"T") and line in VALID_GCODE_T:
+                    # fp add for preheat
+                    self.find_next_active_channel(seek_pos, lines, partial_input, line)
+                    # end
+                    self.print_channel = int(line[1:].decode())
                     if self.print_channel != self.load_channel:
                         self.gcode.run_script("M400")
                         self.change_filament = True
@@ -578,18 +829,57 @@ class VirtualSD:
                     self.file_position = self.next_file_position
                     continue
 
-                try:
-                    self.gcode.run_script(line)
-                except self.gcode.error as e:
-                    error_message = str(e)
+                # Try C-level fast path for simple G0/G1 moves
+                fast_ok = False
+                g1line = raw
+                if (len(g1line) > 1 and g1line.startswith((b'G0', b'G1'))
+                    and (len(g1line) <= 2
+                         or g1line[2:3] in (b' ', b'\t', b';'))):
+                    g1p = self._g1_params
+                    if self.chelper_lib.gcode_parse_g1(
+                            line, len(line), g1p) == 0:
+                        try:
+                            x = g1p.X if g1p.has_X else None
+                            y = g1p.Y if g1p.has_Y else None
+                            z = g1p.Z if g1p.has_Z else None
+                            e = g1p.E if g1p.has_E else None
+                            f = g1p.F if g1p.has_F else None
+                            with gcode_mutex:
+                                self.gcode_move.fast_G1(x, y, z, e, f)
+                            fast_ok = True
+                        except self.gcode.error as e:
+                            error_message = str(e)
+                            self.gcode._respond_error(error_message)
+                            self.printer.send_event("gcode:command_error")
+                            try:
+                                self.gcode.run_script(
+                                    self.on_error_gcode.render())
+                            except:
+                                logging.exception("virtual_sdcard on_error")
+                            break
+                        except:
+                            msg = ('Internal error on fast-G1'
+                                   ' dispatch')
+                            logging.exception(msg)
+                            self.printer.invoke_shutdown(msg)
+                            break
+                if not fast_ok:
                     try:
-                        self.gcode.run_script(self.on_error_gcode.render())
+                        self.gcode.run_script(line.decode())
+                    except self.gcode.error as e:
+                        error_message = str(e)
+                        try:
+                            self.gcode.run_script(
+                                self.on_error_gcode.render())
+                        except:
+                            logging.exception("virtual_sdcard on_error")
+                        break
                     except:
-                        logging.exception("virtual_sdcard on_error")
-                    break
-                except:
-                    logging.exception("virtual_sdcard dispatch")
-                    break
+                        logging.exception("virtual_sdcard dispatch")
+                        break
+            if self.reactor.monotonic() - batch_start >= SD_WORK_BATCH_TIME:
+                self.reactor.pause(self.reactor.monotonic() + SD_WORK_BATCH_PAUSE)
+                batch_start = self.reactor.monotonic()
             self.cmd_from_sd = False
             self.file_position = self.next_file_position
             # Do we need to skip around?
@@ -601,7 +891,7 @@ class VirtualSD:
                     self.work_timer = None
                     return self.reactor.NEVER
                 lines = []
-                partial_input = ""
+                partial_input = b""
         logging.info("Exiting SD card print (position %d)", self.file_position)
         self.work_timer = None
         self.cmd_from_sd = False

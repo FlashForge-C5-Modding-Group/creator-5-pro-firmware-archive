@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2021  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging
+import logging, math
 MUTE_MODE_VALUE = 50
 MUTE_MODE_ENABLE  = 0xFFFF
 MUTE_MODE_DISABLE = 0xEEEE
@@ -39,6 +39,7 @@ class GCodeMove:
         gcode.register_command('GET_POSITION', self.cmd_GET_POSITION, True,
                                desc=self.cmd_GET_POSITION_help)
         self.Coord = gcode.Coord
+        self.gcode = gcode
         # G-Code coordinate manipulation
         self.absolute_coord = self.absolute_extrude = True
         self.base_position = [0.0, 0.0, 0.0, 0.0]
@@ -47,6 +48,24 @@ class GCodeMove:
         self.speed = 25.
         self.speed_factor = 1. / 60.
         self.extrude_factor = 1.
+        
+        printer_config = config.getsection('printer')
+        self.short_move_limit = printer_config.getboolean(
+            'short_move_limit', True)
+        self.short_move_distance = printer_config.getfloat(
+            'short_move_distance', 0.75, above=0.)
+        self.short_move_min_time = printer_config.getfloat(
+            'short_move_min_time', 0.0025, above=0.)
+        self.short_extrude_move_limit = printer_config.getboolean(
+            'short_extrude_move_limit', True)
+        self.short_extrude_move_distance = printer_config.getfloat(
+            'short_extrude_move_distance', 0.75, above=0.)
+        short_extrude_max_velocity = printer_config.getfloat(
+            'short_extrude_move_max_velocity', 80., above=0.)
+        self.short_extrude_move_max_feedrate = printer_config.getfloat(
+            'short_extrude_move_max_feedrate',
+            short_extrude_max_velocity * 60., above=0.)
+        
         # mute mode
         self.user_value = 100
         self.mute_mode = False
@@ -114,10 +133,33 @@ class GCodeMove:
     def reset_last_position(self):
         if self.is_printer_ready:
             self.last_position = self.position_with_transform()
+    def _get_move_speed(self, start_pos, end_pos, speed):
+        if speed <= 0.:
+            return speed
+        x_delta = end_pos[0] - start_pos[0]
+        y_delta = end_pos[1] - start_pos[1]
+        z_delta = end_pos[2] - start_pos[2]
+        move_d = math.sqrt(x_delta*x_delta + y_delta*y_delta
+                           + z_delta*z_delta)
+        if (self.short_move_limit
+            and 0. < move_d <= self.short_move_distance
+            and move_d / speed < self.short_move_min_time):
+            speed = min(speed, move_d / self.short_move_min_time)
+        if not self.short_extrude_move_limit:
+            return speed
+        e_delta = end_pos[3] - start_pos[3]
+        if e_delta <= 0.:
+            return speed
+        xy_dist = math.hypot(x_delta, y_delta)
+        if xy_dist <= 0. or xy_dist > self.short_extrude_move_distance:
+            return speed
+        max_speed = self.short_extrude_move_max_feedrate * self.speed_factor
+        return min(speed, max_speed)
     # G-Code movement commands
     def cmd_G1(self, gcmd):
         # Move
         params = gcmd.get_command_parameters()
+        start_pos = list(self.last_position)
         try:
             for pos, axis in enumerate('XYZ'):
                 if axis in params:
@@ -145,7 +187,39 @@ class GCodeMove:
         except ValueError as e:
             raise gcmd.error("Unable to parse move '%s'"
                              % (gcmd.get_commandline(),))
-        self.move_with_transform(self.last_position, self.speed)
+        move_speed = self._get_move_speed(start_pos, self.last_position,
+                                          self.speed)
+        self.move_with_transform(self.last_position, move_speed)
+    def fast_G1(self, x=None, y=None, z=None, e=None, f=None):
+        pos = self.last_position
+        start_pos = list(pos)
+        if x is not None:
+            if not self.absolute_coord:
+                pos[0] += x
+            else:
+                pos[0] = x + self.base_position[0]
+        if y is not None:
+            if not self.absolute_coord:
+                pos[1] += y
+            else:
+                pos[1] = y + self.base_position[1]
+        if z is not None:
+            if not self.absolute_coord:
+                pos[2] += z
+            else:
+                pos[2] = z + self.base_position[2]
+        if e is not None:
+            ev = e * self.extrude_factor
+            if not self.absolute_coord or not self.absolute_extrude:
+                pos[3] += ev
+            else:
+                pos[3] = ev + self.base_position[3]
+        if f is not None:
+            if f <= 0.:
+                raise self.gcode.error("Invalid speed in fast-G1")
+            self.speed = f * self.speed_factor
+        move_speed = self._get_move_speed(start_pos, pos, self.speed)
+        self.move_with_transform(pos, move_speed)
     # G-Code coordinate manipulation
     def cmd_G20(self, gcmd):
         # Set units to inches
