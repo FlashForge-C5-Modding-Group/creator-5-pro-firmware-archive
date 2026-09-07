@@ -50,42 +50,40 @@ cp_file()
 	#echo ${DSTFILEMD5}
 }
 
+# free 28M
 rm /usr/prog/qt-4.8.6 -rf
-rm /usr/prog/nim -rf
+# free 22M
 rm /usr/prog/opencv-4.10 -rf
+# free 3M
 rm /usr/prog/wifi/8821cu.ko*
+sync
 
 if [ -f $WORK_DIR/zip/img.zip  ]; then
-        #rm /usr/data/firmwareRes/img -rf
-	#sync
 	unzip -o $WORK_DIR/zip/img.zip -d /usr/data/firmwareRes/
 	sleep 1
 	sync
 fi
 
 if [ -f $WORK_DIR/zip/font.zip  ]; then
-        #rm /usr/data/firmwareRes/font -rf
-	#sync
 	unzip -o $WORK_DIR/zip/font.zip -d /usr/data/firmwareRes/
-	sync
-	unzip -o -j $WORK_DIR/zip/font1.zip -d  /usr/data/firmwareRes/font/
-	sync
-	unzip -o -j $WORK_DIR/zip/font2.zip -d  /usr/data/firmwareRes/font/
-	sync
-	unzip -o -j $WORK_DIR/zip/font3.zip -d  /usr/data/firmwareRes/font/
 	sync
 	chmod 777 /usr/data/firmwareRes/font/*
 	sync
 	sleep 1
 fi
 
+if [ -f $WORK_DIR/zip/ffmpeg-402.zip  ]; then
+	echo "unzip ffmpeg-4.0.2..."
+	unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
+	sleep 1
+	sync
+fi
 
 # copy reset factory model
 if [ -f "$GCODE_DIR/Doberman‌_PLA_3h26m.gcode" ]; then
         rm "$GCODE_DIR/Doberman‌_PLA_3h26m.gcode"
 	sync
 fi
-
 
 if [ -f $GCODE_DIR/3DBenchy_PLA_40m32s.gcode ] || [ -f $GCODE_DIR/3DBenchy_PLA_50m28s.gcode ] || [ -f $GCODE_DIR/3DBenchy_PLA_49m52s.gcode.3mf ]; then
         rm $GCODE_DIR/3DBenchy_PLA_40m32s.gcode
@@ -104,15 +102,11 @@ if [ -f $GCODE_DIR/Logo_PLA_10m43s.gcode ] || [ -f $GCODE_DIR/Logo_PLA_17m6s.gco
 	sync
 fi
 
-echo "unzip ffmpeg-4.0.2..."
-unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
 sync
-    
-#if [ ! -d "/usr/prog/ffmpeg-402" ]; then
-#    echo "unzip ffmpeg-4.0.2..."
-#    unzip -o $WORK_DIR/zip/ffmpeg-402.zip -d /usr/prog/
-#    sync
-#fi
+
+# 删除更新过后的文件，释放空间
+rm $WORK_DIR/zip/*.zip
+sync
 
 cd /usr/prog/PROGRAM/library/
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
