@@ -103,7 +103,10 @@ echo $CONTRIL_FLAG
 
 if [ -f ${CONTRIL_FLAG} ] || [ -f ${CONTRIL_M} ];then
 	cd ${CONTROL_DIR}${CONTROL_VERSION}
-	./run.sh
+	rm /usr/data/logs/control_run.log
+	sync
+	./run.sh 2>&1 | tee -a /usr/data/logs/control_run.log
+	sync
 	reboot -f
 fi
 

@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math, logging
 import stepper, chelper
+from extras import output_pin
 
 class ExtruderStepper:
     def __init__(self, config):
@@ -253,6 +254,10 @@ class PrinterExtruder:
         # Set Extruder Temperature
         temp = gcmd.get_float('S', 0.)
         index = gcmd.get_int('T', None, minval=0)
+
+        # Ensure the 24V power rail (DC24V_CTL) is switched on so that the
+        # heater actually receives power, regardless of the configured 'value'.
+        output_pin.force_output_pin_on(self.printer, 'DC24V_CTL')
 
         if index is not None:
             section = 'extruder'

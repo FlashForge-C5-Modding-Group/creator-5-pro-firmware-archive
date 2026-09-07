@@ -113,6 +113,15 @@ class Printer:
         return self.objects[section]
     def _read_config(self):
         self.objects['configfile'] = pconfig = configfile.PrinterConfig(self)
+        # Startup check & fix of specific config sections (e.g. DC24V_CTL)
+        # is deferred until Klippy finishes startup, so that rewriting the
+        # config does not interfere with the boot config parsing.
+        def _defer_check():
+            try:
+                pconfig.check_fix_startup_config()
+            except Exception:
+                logging.exception("Startup config check failed")
+        self.register_event_handler("klippy:ready", _defer_check)
         config = pconfig.read_main_config()
         if self.bglogger is not None:
             pconfig.log_config(config)

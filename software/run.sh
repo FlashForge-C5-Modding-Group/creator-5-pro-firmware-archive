@@ -53,6 +53,7 @@ rm /usr/prog/qt-4.8.6 -rf
 rm /usr/prog/nim -rf
 rm /usr/prog/opencv-4.10 -rf
 rm /usr/prog/wifi/8821cu.ko*
+sync
 
 cp -f $WORK_DIR/app_startup.sh /usr/prog/
 sync
@@ -73,9 +74,6 @@ cp $WORK_DIR/klipper_pri.sh  /usr/prog/klipper/klipper_pri.sh
 sync
 
 cp $WORK_DIR/start.sh  /usr/prog/klipper/start.sh
-sync
-
-cp $WORK_DIR/firmwareExe /usr/prog/PROGRAM/software/
 sync
 
 cp $WORK_DIR/unTar /usr/prog/bin/unTar
@@ -107,9 +105,22 @@ sync
 
 cp $WORK_DIR/shadow  /usr/prog/etc/shadow
 sync
+
+# unzip firmwareExe
+unzip -o $WORK_DIR/firmwareExe.zip -d $WORK_DIR/
+sleep 1
 sync
 
-sleep 2
+rm $WORK_DIR/firmwareExe.zip
+sync
+mv $WORK_DIR/firmwareExe /usr/prog/PROGRAM/software/firmwareExe
+sync
+
+# 删除更新过后的文件，释放空间
+rm $WORK_DIR/8821cu.ko
+sync
+
+sleep 1
 
 cd /usr/prog/PROGRAM/software
 DIR_COUNT=`find -maxdepth 1 -type d | wc -l`
