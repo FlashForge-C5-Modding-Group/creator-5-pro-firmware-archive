@@ -2,10 +2,11 @@ ota_version=1
 
 img_type=kernel
 img_name=xImage
-img_size=4837440
-img_md5=523d4c6069ca56daa8ece0a129f85ef9
+img_size=5349440
+img_md5=2a797bc9fa3578d241b6115685413ba2
 
 img_type=rootfs
 img_name=rootfs.squashfs
-img_size=18440192
-img_md5=e0f47770a3b4bbb07063bdaa9c5505b7
+img_size=15474688
+img_md5=dd25d7c1a2acaaf51db1c9de0aa0478c
+

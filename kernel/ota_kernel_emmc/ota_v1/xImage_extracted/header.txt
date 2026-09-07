@@ -5,8 +5,8 @@ type: kernel (2)
 compression: none (0)
 load-address: 0x80f00000
 entry-point: 0x80f00000
-data-size: 4837376
-data-crc32: 0x34557e0a (ok)
-header-crc32: 0xf958f831 (ok)
-timestamp: 2026-07-21T05:19:02Z
-linux-banner: Linux version 5.10.186+ (linux@ubuntu) (mips-linux-gnu-gcc (Ingenic MIPS Linux Tools GCC12.1 Release6.0.1 Default xburst2 glibc2.33 support MXA build at 2023.07-28 11:02:00) 12.1.0, GNU ld (GNU Binutils) 2.39) #156 SMP PREEMPT Mon Jul 20 22:18:57 PDT 2026
+data-size: 5349376
+data-crc32: 0x82140d6f (ok)
+header-crc32: 0x8f662bf6 (ok)
+timestamp: 2026-08-25T02:54:09Z
+linux-banner: Linux version 5.10.186+ (yejq@ubuntu) (mips-linux-gnu-gcc (Ingenic MIPS Linux Tools GCC12.1 Release6.0.1 Default xburst2 glibc2.33 support MXA build at 2023.07-28 11:02:00) 12.1.0, GNU ld (GNU Binutils) 2.39) #6 SMP PREEMPT Tue Aug 25 10:37:57 CST 2026
