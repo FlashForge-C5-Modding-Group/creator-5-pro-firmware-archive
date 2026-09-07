@@ -1,9 +1,6 @@
-ca5bf5f2b3e36b76b9cf83a904623501  ./run.sh
-0e8ddef5b5070811d983c7f03fca219b  ./zip/img.zip
+ea7b4104dcfcfd163faa8b2cfe77df54  ./run.sh
+53ddb6e24792f9b3932a226464e794e6  ./zip/img.zip
 686d4a8203c080b1b391e348f65d796a  ./zip/ffmpeg-402.zip
-8d073db7f2bbe4e4c58feed7b72f7e08  ./zip/font1.zip
-ef3c3b688c9f0c1310d53c7e694009de  ./zip/font2.zip
-5fc86fa6a1f6a2658ca167306b89602e  ./zip/font.zip
-eb647daa4e1b751d2616bd60fb07a3fd  ./zip/font3.zip
+0e3ea7a5d6c872791e3b23ecab302c1f  ./zip/font.zip
 3354a3404ef1589fa0b73b9021f74ed0  ./model/C5P_logo-06_PLA_17m45s.gcode.3mf
 b88e283d89dd6084efa30f65364ca771  ./model/C5P_3DBenchy_PLA_53m29s.gcode.3mf
