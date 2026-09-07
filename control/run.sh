@@ -23,10 +23,13 @@ fi
 
 cat $WORK_DIR/mcu.img > /dev/fb0
 
+# free 28M
 rm /usr/prog/qt-4.8.6 -rf
-rm /usr/prog/nim -rf
+# free 22M
 rm /usr/prog/opencv-4.10 -rf
+# free 3M
 rm /usr/prog/wifi/8821cu.ko*
+sync
 
 if [ -f $WORK_DIR/IAPCommand ];then
         chmod a+x $WORK_DIR/IAPCommand
@@ -98,7 +101,7 @@ if [ -f $WORK_DIR/ISPCommand ];then
                 $WORK_DIR/ISPCommand  $WORK_DIR/$MCU_GD_M3  >> $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log
 				
 				if [ -f $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ];then
-					if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ; then
+					if ! grep -q "finished" "$UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log" ; then
 						echo "burn GD M3 include error | fail..."
 					else
 						echo "burn GD M3 completed..."
@@ -114,6 +117,7 @@ if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ];then
 	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_EBOARD_M3.log ; then
 		echo "result: eBoard failed, touch Update..."
 		touch $WORK_DIR/Update
+		sync
 		cat $WORK_DIR/eBoard_fail.img > /dev/fb0
 		sleep 10000
 	fi
@@ -123,6 +127,7 @@ if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ];then
 	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_HEATERBOARD_M3.log ; then
 		echo "result: heaterBoard failed, touch Update..."
 		touch $WORK_DIR/Update
+		sync
 		cat $WORK_DIR/heaterBoard_fail.img > /dev/fb0
 		sleep 10000
 	fi
@@ -132,15 +137,17 @@ if [ -f $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ];then
 	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_FIRMWARE_LEVELBOARD_M3.log ; then
 		echo "result: levelBoard failed, touch Update..."
 		touch $WORK_DIR/Update
+		sync
 		cat $WORK_DIR/levelBoard_fail.img > /dev/fb0
 		sleep 10000
 	fi
 fi
 
 if [ -f $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ];then
-	if grep -q "error\|fail\|not" $UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log ; then
+	if ! grep -q "finished" "$UPDATE_LOG_DIR/UPDATA_MCU_GD_M3.log"; then
 		echo "result: mainMcu failed, touch Update..."
 		touch $WORK_DIR/Update
+		sync
 		cat $WORK_DIR/mcu_fail.img > /dev/fb0
 		sleep 10000
 	fi
@@ -155,7 +162,8 @@ if [ ${DIR_COUNT} -gt 2 ];then
 	echo "rm " $CONTROL_VERSION
         rm -r /usr/prog/PROGRAM/control/$CONTROL_VERSION
 fi
-		
+
+sync		
 sleep 3
 
 exit 0
