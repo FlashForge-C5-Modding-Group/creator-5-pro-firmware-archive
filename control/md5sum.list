@@ -1,4 +1,4 @@
-abac7abb054cafba7b95ca1cbe141cc7  ./run.sh
+537e24dd866bb5d35c344fdc1d4f0db4  ./run.sh
 be3e22f8defd7856c67845f43b5ab8ed  ./levelBoard_fail.img
 e8039b6c3705bf0fb46cd4cc4a49460a  ./mcu_fail.img
 1a4960f0a4d0f7c4a9373a6716800ec4  ./heaterBoard.hex
@@ -9,6 +9,6 @@ b4002d1edc452ad0ca53740275566645  ./eBoard.hex
 27bbd98241f997ad207fc812d2dcd723  ./heaterBoard_fail.img
 d41d8cd98f00b204e9800998ecf8427e  ./Update
 ff9a4fad37e2217b3d28474d2bf310b4  ./eBoard_fail.img
-2b4776b68da5e986cf160abcbd6d7fd0  ./IAPCommand
-707d6139be6a598454c2782e446ec1a8  ./ISPCommand
+ff7aa48dacf9e4f8f64f35175360f403  ./IAPCommand
+8a97b914eecfaeee7e357f954e0a025b  ./ISPCommand
 7cdd7cbe75a5a6e31fb89e32592745ad  ./mainBoardGD.hex
