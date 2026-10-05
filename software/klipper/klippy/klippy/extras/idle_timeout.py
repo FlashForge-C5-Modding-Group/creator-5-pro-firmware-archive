@@ -13,6 +13,12 @@ M84
 {% if 'output_pin DC24V_CTL' in printer %}
    SET_PIN PIN=DC24V_CTL VALUE=0
 {% endif %}
+{% if 'fan_generic chamber_heat_fan' in printer %}
+   SET_FAN_SPEED FAN=chamber_heat_fan SPEED=0
+{% endif %}
+{% if 'fan_generic chamber_loop_fan' in printer %}
+   SET_FAN_SPEED FAN=chamber_loop_fan SPEED=0
+{% endif %}
 """
 
 PIN_MIN_TIME = 0.100

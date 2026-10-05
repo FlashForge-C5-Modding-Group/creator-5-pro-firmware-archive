@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-from . import pulse_counter
+from . import pulse_counter, output_pin
 
 FAN_MIN_TIME = 0.100
 
@@ -121,6 +121,9 @@ class PrinterFan:
     def cmd_M106(self, gcmd):
         # Set fan speed
         value = gcmd.get_float('S', 255., minval=0.) / 255.
+        # Ensure the 24V power rail (DC24V_CTL) is switched on so that the
+        # fan actually receives power, regardless of the configured 'value'.
+        output_pin.force_output_pin_on(self.printer, 'DC24V_CTL')
         self.fan.set_speed_from_command(value)
     def cmd_M107(self, gcmd):
         # Turn fan off

@@ -180,7 +180,9 @@ if [ 0 == $count ];then
 	do
     		echo $SoftwareVer
 	done
-	cp /usr/prog/PROGRAM/software/$SoftwareVer/firmwareExe /usr/prog/PROGRAM/software/
+	unzip -o /usr/prog/PROGRAM/software/$SoftwareVer/firmwareExe.zip -d /usr/prog/PROGRAM/software/
+	sync
+	sleep 2
 	/usr/prog/PROGRAM/software/firmwareExe &
 fi
 

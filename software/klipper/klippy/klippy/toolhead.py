@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import math, logging, importlib
+import math, logging, importlib, collections
 import mcu, chelper, kinematics.extruder
 
 # Common suffixes: _d is distance (in mm), _v is velocity (in
@@ -222,19 +222,34 @@ class ToolHead:
         self.max_accel = config.getfloat('max_accel', above=0.)
         self.short_move_limit = config.getboolean('short_move_limit', True)
         self.short_move_distance = config.getfloat(
-            'short_move_distance', 0.75, above=0.)
+            'short_move_distance', 0.3, above=0.)
         self.short_move_min_time = config.getfloat(
-            'short_move_min_time', 0.0025, above=0.)
+            'short_move_min_time', 0.0015, above=0.)
         self.short_move_max_accel = config.getfloat(
-            'short_move_max_accel', 5000., above=0.)
+            'short_move_max_accel', 10000., above=0.)
         self.short_extrude_move_limit = config.getboolean(
             'short_extrude_move_limit', True)
         self.short_extrude_move_distance = config.getfloat(
-            'short_extrude_move_distance', 0.75, above=0.)
+            'short_extrude_move_distance', 0.5, above=0.)
         self.short_extrude_move_max_velocity = config.getfloat(
-            'short_extrude_move_max_velocity', 80., above=0.)
+            'short_extrude_move_max_velocity', 120., above=0.)
         self.short_extrude_move_max_accel = config.getfloat(
-            'short_extrude_move_max_accel', 1500., above=0.)
+            'short_extrude_move_max_accel', 5000., above=0.)
+        # fp add: dynamic short-move limiting. The static limits above are
+        # applied to every model, which also slows down models that are
+        # actually safe (e.g. arc infill at a moderate feedrate). Instead of
+        # always limiting, estimate the current command density (moves per
+        # second) over a sliding window and only apply the limits when the
+        # density is high enough to risk a "Timer too close" on the MCU.
+        self.dyn_limit_enable = config.getboolean(
+            'dynamic_short_move_limit', True)
+        self.dyn_limit_window = config.getint(
+            'dynamic_short_move_window', 100, minval=10)
+        self.dyn_limit_freq_low = config.getfloat(
+            'dynamic_short_move_freq_low', 80., above=0.)
+        self.dyn_limit_freq_high = config.getfloat(
+            'dynamic_short_move_freq_high', 200., above=0.)
+        self.move_t_window = collections.deque(maxlen=self.dyn_limit_window)
         min_cruise_ratio = 0.5
         if config.getfloat('minimum_cruise_ratio', None) is None:
             req_accel_to_decel = config.getfloat('max_accel_to_decel', None,
@@ -487,21 +502,49 @@ class ToolHead:
         self.commanded_pos[:] = newpos
         self.kin.set_position(newpos, homing_axes)
         self.printer.send_event("toolhead:set_position")
+    def _calc_dynamic_limit_intensity(self):
+        # fp add: short-move limit strength.
+        #   0.0 = no limiting (model is safe -> allow full speed)
+        #   1.0 = apply the configured static limits (dense commands)
+        # The estimate uses the average move time over the last N moves,
+        # which is the inverse of the command density (moves per second).
+        if not self.dyn_limit_enable:
+            return 1.
+        if len(self.move_t_window) < self.dyn_limit_window:
+            return 1.  # not enough samples yet - stay conservative
+        avg_t = sum(self.move_t_window) / len(self.move_t_window)
+        if avg_t <= 0.:
+            return 1.
+        freq = 1. / avg_t
+        if freq <= self.dyn_limit_freq_low:
+            return 0.
+        if freq >= self.dyn_limit_freq_high:
+            return 1.
+        return ((freq - self.dyn_limit_freq_low)
+                / (self.dyn_limit_freq_high - self.dyn_limit_freq_low))
     def move(self, newpos, speed):
         move = Move(self, self.commanded_pos, newpos, speed)
         if not move.move_d:
             return
         if move.is_kinematic_move:
-            if (self.short_move_limit
-                and 0. < move.move_d <= self.short_move_distance
-                and move.min_move_t < self.short_move_min_time):
-                move.limit_speed(move.move_d / self.short_move_min_time,
-                                 self.short_move_max_accel)
-            xy_dist = math.hypot(move.axes_d[0], move.axes_d[1])
-            if (self.short_extrude_move_limit and move.axes_d[3] > 0.
-                and 0. < xy_dist <= self.short_extrude_move_distance):
-                move.limit_speed(self.short_extrude_move_max_velocity,
-                                 self.short_extrude_move_max_accel)
+            # fp add: record raw move time for the density estimate
+            self.move_t_window.append(move.min_move_t)
+            intensity = self._calc_dynamic_limit_intensity()
+            if intensity > 0.:
+                eff_dist = self.short_move_distance * intensity
+                eff_min_t = self.short_move_min_time * intensity
+                if (self.short_move_limit
+                    and 0. < move.move_d <= eff_dist
+                    and move.min_move_t < eff_min_t):
+                    move.limit_speed(move.move_d / eff_min_t,
+                                     self.short_move_max_accel)
+                xy_dist = math.hypot(move.axes_d[0], move.axes_d[1])
+                if (self.short_extrude_move_limit and move.axes_d[3] > 0.
+                    and 0. < xy_dist <= (self.short_extrude_move_distance
+                                         * intensity)
+                    and move.min_move_t < eff_min_t):
+                    move.limit_speed(self.short_extrude_move_max_velocity,
+                                     self.short_extrude_move_max_accel)
         if move.is_kinematic_move:
             self.kin.check_move(move)
         if move.axes_d[3]:

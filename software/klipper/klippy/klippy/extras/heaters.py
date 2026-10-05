@@ -21,6 +21,8 @@ class Heater:
         self.printer = config.get_printer()
         self.name = config.get_name()
         self.short_name = short_name = self.name.split()[-1]
+        # chamber_heater idle
+        self.idle_flag = False
         # Setup sensor
         self.sensor = sensor
         self.min_temp = config.getfloat('min_temp', minval=KELVIN_TO_CELSIUS)
@@ -91,6 +93,15 @@ class Heater:
             adj_time = min(time_diff * self.inv_smooth_time, 1.)
             self.smoothed_temp += temp_diff * adj_time
             self.can_extrude = (self.smoothed_temp >= self.min_extrude_temp)
+        if self.short_name == "chamber_heater" and self.idle_flag:
+            reactor = self.printer.get_reactor()
+            eventtime = reactor.monotonic()
+            #if not self.check_busy(eventtime):
+            if self.target_temp - self.smoothed_temp < 0.5:
+                gcode = self.printer.lookup_object('gcode')
+                gcode.run_script_from_command("SET_IDLE_TIMEOUT TIMEOUT=600")
+                logging.info("chamber_heater_end_SET_IDLE_TIMEOUT TIMEOUT=600")
+                self.idle_flag = False
         #logging.debug("temp: %.3f %f = %f", read_time, temp)
     def _handle_shutdown(self):
         self.is_shutdown = True
@@ -153,6 +164,11 @@ class Heater:
         output_pin.force_output_pin_on(self.printer, 'DC24V_CTL')
         pheaters = self.printer.lookup_object('heaters')
         pheaters.set_temperature(self, temp)
+        if self.short_name == "chamber_heater" and temp > 25:
+            gcode = self.printer.lookup_object('gcode')
+            gcode.run_script_from_command("SET_IDLE_TIMEOUT TIMEOUT=3000")
+            self.idle_flag = True
+            logging.info("chamber_heater_start_SET_IDLE_TIMEOUT TIMEOUT=3000")
 
 
 ######################################################################
