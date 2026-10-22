@@ -100,10 +100,18 @@ class ArcSupport:
             # Slicers may emit full XY helical arcs for non-printing Z-hop.
             # Execute those as simple Z moves to avoid many tiny timer events.
             if asF is not None:
-                asF = min(asF, self.zhop_arc_max_feedrate)
+                z_feedrate = min(asF, self.zhop_arc_max_feedrate)
+                # The arc declared this feedrate - it stays the modal value.
+                modal_feedrate = asF
             else:
-                asF = self.zhop_arc_max_feedrate
-            self.gcode_move.fast_G1(z=asTarget[2], f=asF)
+                z_feedrate = self.zhop_arc_max_feedrate
+                # No F on the arc - the previous modal feedrate still applies.
+                modal_feedrate = gcodestatus['speed']
+            self.gcode_move.fast_G1(z=asTarget[2], f=z_feedrate)
+            # The Z-hop speed cap is meant for this move only.  Restore the
+            # modal feedrate so following moves that omit F are not dragged
+            # down to the capped speed.
+            self.gcode_move.set_feedrate(modal_feedrate)
             return
 
         # Build list of linear coordinates to move

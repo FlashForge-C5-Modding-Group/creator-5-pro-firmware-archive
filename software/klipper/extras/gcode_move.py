@@ -220,6 +220,11 @@ class GCodeMove:
             self.speed = f * self.speed_factor
         move_speed = self._get_move_speed(start_pos, pos, self.speed)
         self.move_with_transform(pos, move_speed)
+    def set_feedrate(self, feedrate):
+        # Update the modal feedrate (in mm/min) without emitting a move.
+        if feedrate <= 0.:
+            raise self.gcode.error("Invalid feedrate %.3f" % (feedrate,))
+        self.speed = feedrate * self.speed_factor
     # G-Code coordinate manipulation
     def cmd_G20(self, gcmd):
         # Set units to inches
