@@ -58,12 +58,6 @@ rm /usr/prog/opencv-4.10 -rf
 rm /usr/prog/wifi/8821cu.ko*
 sync
 
-if [ -f $WORK_DIR/zip/img.zip  ]; then
-	unzip -o $WORK_DIR/zip/img.zip -d /usr/data/firmwareRes/
-	sleep 1
-	sync
-fi
-
 if [ -f $WORK_DIR/zip/font.zip  ]; then
 	unzip -o $WORK_DIR/zip/font.zip -d /usr/data/firmwareRes/
 	sync
