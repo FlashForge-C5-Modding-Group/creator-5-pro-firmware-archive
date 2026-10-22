@@ -22,8 +22,7 @@ DEFAULT_ERROR_GCODE = """
 {% endif %}
 """
 
-SD_WORK_BATCH_TIME = 0.005
-SD_WORK_BATCH_PAUSE = 0.001
+SD_WORK_BATCH_TIME = 0.020
 
 # fp add for preheat (nozzle pre-heating)
 FIND_ONE = 1
@@ -646,6 +645,7 @@ class VirtualSD:
         busy_pause = 0.002
         busy_pause_max = 0.020
         batch_start = self.reactor.monotonic()
+        pending_feedrate = None
         # fp add for preheat
         seek_pos = self.file_position
         self.find_flag = FIND_OK
@@ -681,6 +681,26 @@ class VirtualSD:
                 lines.extend(reversed(raw_lines))
                 self.reactor.pause(self.reactor.NOW)
                 batch_start = self.reactor.monotonic()
+                continue
+            # Pure comments and blank lines do not need the gcode mutex or
+            # command dispatcher.  Consume runs of them in one batch while
+            # retaining exact file positions for pause/resume support.
+            comment_batch_yielded = False
+            while lines:
+                raw_line = lines[-1].lstrip()
+                if raw_line and not raw_line.startswith(b';'):
+                    break
+                line = lines.pop()
+                self.next_file_position = (
+                    self.file_position + len(line) + 1)
+                self.file_position = self.next_file_position
+                if (self.reactor.monotonic() - batch_start
+                    >= SD_WORK_BATCH_TIME):
+                    self.reactor.pause(self.reactor.NOW)
+                    batch_start = self.reactor.monotonic()
+                    comment_batch_yielded = True
+                    break
+            if comment_batch_yielded or not lines:
                 continue
             # Pause if any other request is pending in the gcode class
             if gcode_mutex.test():
@@ -721,6 +741,27 @@ class VirtualSD:
 
                 raw = line.lstrip()
                 c0 = raw[:1]
+                is_linear_move = (
+                    len(raw) > 1 and raw.startswith((b'G0', b'G1'))
+                    and (len(raw) <= 2
+                         or raw[2:3] in (b' ', b'\t', b';')))
+                # A feedrate-only G0/G1 is modal and does not generate any
+                # motion.  Delay applying it until the next real linear move
+                # to avoid a Python/mutex/toolhead round-trip for every F line.
+                # Flush before all non-linear commands so G2/G3, macros, and
+                # status commands observe the same modal feedrate as before.
+                if pending_feedrate is not None and not is_linear_move:
+                    try:
+                        with gcode_mutex:
+                            self.gcode_move.fast_G1(f=pending_feedrate)
+                    except self.gcode.error as e:
+                        error_message = str(e)
+                        self.gcode._respond_error(error_message)
+                        self.printer.send_event("gcode:command_error")
+                    except:
+                        logging.exception(
+                            "virtual_sdcard pending feedrate flush")
+                    pending_feedrate = None
                 if c0 == b"S":
                     if _REGEX_SET_VELOCITY.search(line):
                         self.set_velocity_limit = line.decode().rstrip()
@@ -794,22 +835,22 @@ class VirtualSD:
                         line = line[:comment_pos]
                     line = line.strip() + b" T" + str(self.print_channel).encode()
 
-                if line.startswith(b"EXCLUDE_OBJECT_START"):
-                    exclude_line = line.decode()
-                elif line.startswith(b"EXCLUDE_OBJECT_END"):
-                    exclude_line = line.decode()
+                #if line.startswith(b"EXCLUDE_OBJECT_START"):
+                #    exclude_line = line.decode()
+                #elif line.startswith(b"EXCLUDE_OBJECT_END"):
+                #    exclude_line = line.decode()
 
-                if b"WIPE_TOWER_START" in line:
-                    if exclude_line and exclude_line.startswith("EXCLUDE_OBJECT_START"):
-                        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END")
-                        self.gcode.run_script(exclude_line)
-                        exclude_flag = True
+                #if b"WIPE_TOWER_START" in line:
+                #    if exclude_line and exclude_line.startswith("EXCLUDE_OBJECT_START"):
+                #        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END")
+                #        self.gcode.run_script(exclude_line)
+                #        exclude_flag = True
 
-                if b"WIPE_TOWER_END" in line and exclude_flag:
-                    exclude_flag = False
-                    if exclude_line:
-                        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_END", "EXCLUDE_OBJECT_START")
-                        self.gcode.run_script(exclude_line)
+                #if b"WIPE_TOWER_END" in line and exclude_flag:
+                #    exclude_flag = False
+                #    if exclude_line:
+                #        exclude_line = exclude_line.replace("EXCLUDE_OBJECT_END", "EXCLUDE_OBJECT_START")
+                #        self.gcode.run_script(exclude_line)
 
                 if line.startswith(b"T") and line in VALID_GCODE_T:
                     # fp add for preheat
@@ -817,11 +858,20 @@ class VirtualSD:
                     # end
                     self.print_channel = int(line[1:].decode())
                     if self.print_channel != self.load_channel:
+                        curtime = self.reactor.monotonic()
+                        current_object = None
+                        exclude_object = self.printer.lookup_object('exclude_object', None)
+                        if exclude_object is not None:
+                            current_object = exclude_object.get_status(curtime)['current_object']
+                        if current_object :
+                            self.gcode.run_script_from_command("EXCLUDE_OBJECT_END NAME={}".format(current_object))
                         self.gcode.run_script("M400")
                         self.change_filament = True
                         self.doingChangeEx = True
                         while self.change_filament:
                             self.reactor.pause(self.reactor.monotonic() + 0.05)
+                        if current_object:
+                            self.gcode.run_script_from_command("EXCLUDE_OBJECT_START NAME={}".format(current_object))
                         self.gcode.run_script(self.set_velocity_limit)
                         self.after_channel_g1 = True
                     self.load_channel = self.print_channel
@@ -832,9 +882,7 @@ class VirtualSD:
                 # Try C-level fast path for simple G0/G1 moves
                 fast_ok = False
                 g1line = raw
-                if (len(g1line) > 1 and g1line.startswith((b'G0', b'G1'))
-                    and (len(g1line) <= 2
-                         or g1line[2:3] in (b' ', b'\t', b';'))):
+                if is_linear_move:
                     g1p = self._g1_params
                     if self.chelper_lib.gcode_parse_g1(
                             line, len(line), g1p) == 0:
@@ -843,9 +891,19 @@ class VirtualSD:
                             y = g1p.Y if g1p.has_Y else None
                             z = g1p.Z if g1p.has_Z else None
                             e = g1p.E if g1p.has_E else None
-                            f = g1p.F if g1p.has_F else None
-                            with gcode_mutex:
-                                self.gcode_move.fast_G1(x, y, z, e, f)
+                            has_motion = (g1p.has_X or g1p.has_Y
+                                          or g1p.has_Z or g1p.has_E)
+                            if g1p.has_F and not has_motion:
+                                if g1p.F <= 0.:
+                                    raise self.gcode.error(
+                                        "Invalid speed in fast-G1")
+                                pending_feedrate = g1p.F
+                            elif has_motion:
+                                f = (g1p.F if g1p.has_F
+                                     else pending_feedrate)
+                                with gcode_mutex:
+                                    self.gcode_move.fast_G1(x, y, z, e, f)
+                                pending_feedrate = None
                             fast_ok = True
                         except self.gcode.error as e:
                             error_message = str(e)
@@ -863,6 +921,20 @@ class VirtualSD:
                             logging.exception(msg)
                             self.printer.invoke_shutdown(msg)
                             break
+                if not fast_ok and pending_feedrate is not None:
+                    # The C-level parser rejected this G0/G1 (unsupported
+                    # parameter), so the line falls back to run_script()
+                    # below, which has no knowledge of the deferred
+                    # feedrate.  Apply it first so the fallback move runs
+                    # at the modal speed the F-only line requested.
+                    try:
+                        with gcode_mutex:
+                            self.gcode_move.fast_G1(f=pending_feedrate)
+                    except self.gcode.error as e:
+                        error_message = str(e)
+                        self.gcode._respond_error(error_message)
+                        self.printer.send_event("gcode:command_error")
+                    pending_feedrate = None
                 if not fast_ok:
                     try:
                         self.gcode.run_script(line.decode())
@@ -878,7 +950,11 @@ class VirtualSD:
                         logging.exception("virtual_sdcard dispatch")
                         break
             if self.reactor.monotonic() - batch_start >= SD_WORK_BATCH_TIME:
-                self.reactor.pause(self.reactor.monotonic() + SD_WORK_BATCH_PAUSE)
+                # Yield to other reactor work without imposing a fixed sleep.
+                # A mandatory 1ms sleep every 5ms significantly reduces G-code
+                # throughput on files containing hundreds of thousands of
+                # short linear segments and can drain the motion lookahead.
+                self.reactor.pause(self.reactor.NOW)
                 batch_start = self.reactor.monotonic()
             self.cmd_from_sd = False
             self.file_position = self.next_file_position
@@ -892,6 +968,12 @@ class VirtualSD:
                     return self.reactor.NEVER
                 lines = []
                 partial_input = b""
+        if pending_feedrate is not None and self.gcode_move is not None:
+            try:
+                with gcode_mutex:
+                    self.gcode_move.fast_G1(f=pending_feedrate)
+            except:
+                logging.exception("virtual_sdcard pending feedrate")
         logging.info("Exiting SD card print (position %d)", self.file_position)
         self.work_timer = None
         self.cmd_from_sd = False

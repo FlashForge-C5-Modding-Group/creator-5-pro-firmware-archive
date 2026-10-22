@@ -58,9 +58,9 @@ do
 					export LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib:$LD_LIBRARY_PATH
 					/usr/prog/bin/unTar ${SRCFILE}
 					sync
-					if [ ! -f /usr/data/update/runFirmwareExe.sh ];then
-						tar -xvf ${SRCFILE} -C /usr/data/update/
-					fi
+					#if [ ! -f /usr/data/update/runFirmwareExe.sh ];then
+					#	tar -xvf ${SRCFILE} -C /usr/data/update/
+					#fi
 					sync
 					rm -rf ${SRCFILE}
 					chmod a+x /usr/data/update/runFirmwareExe.sh
@@ -180,7 +180,9 @@ if [ 0 == $count ];then
 	do
     		echo $SoftwareVer
 	done
-	cp /usr/prog/PROGRAM/software/$SoftwareVer/firmwareExe /usr/prog/PROGRAM/software/
+	unzip -o /usr/prog/PROGRAM/software/$SoftwareVer/firmwareExe.zip -d /usr/prog/PROGRAM/software/
+	sync
+	sleep 2
 	/usr/prog/PROGRAM/software/firmwareExe &
 fi
 

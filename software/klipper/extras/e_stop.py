@@ -273,7 +273,7 @@ class EStopFunc:
                     toolhead.dwell(1)
                     # reactor.pause(reactor.monotonic() + 1)
                     if i == 5:
-                        error = '{"module": "estop", "status": "fail", "coded" : "0201-0000-0001", "msg" : "Probe triggered prior to movement"}'
+                        error = 'Probe triggered prior to movement-failed 5 times'
                         raise self.printer.command_error(error)
                     continue
                 else:
